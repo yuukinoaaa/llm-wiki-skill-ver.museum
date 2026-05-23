@@ -62,15 +62,18 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 
 推荐做法：
 
-1. 让 Claude Code 读取刚生成的 `*.blocks.json`。
-2. 要求它先给出摄入计划摘要，包括将创建的路线页、实体页和主要互链。
-3. 你确认摘要后，再让它输出完整 JSON。
-4. 将 JSON 保存为 `ingest-plan.json`。
+1. 在本仓库根目录打开 Claude Code。
+2. 明确要求 Claude Code 先阅读并使用本目录下的 `SKILL.md`，按 `/llm-wiki` 的文档摄入流程工作。
+3. 让 Claude Code 读取刚生成的 `*.blocks.json`。
+4. 要求它先给出摄入计划摘要，包括将创建的路线页、实体页和主要互链。
+5. 你确认摘要后，再让它输出完整 JSON。
+6. 将 JSON 保存为 `ingest-plan.json`。
 
 可以直接复制这段提示词给 Claude Code：
 
 ```text
-请读取 `展览讲解词.blocks.json`，为 llm-wiki 生成一个摄入计划 JSON。
+请使用当前仓库中的 `SKILL.md`，按 `/llm-wiki` 文档摄入流程工作。
+请先阅读 `SKILL.md`、`README.zh.md` 和 `展览讲解词.blocks.json`，然后为 llm-wiki 生成一个摄入计划 JSON。
 
 要求：
 - 只基于 blocks 中的内容，不联网补充。
@@ -90,7 +93,7 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 3. 关键互链
 4. 可能需要人工确认的歧义
 
-我确认后，再输出完整 `ingest-plan.json`。
+我确认后，再输出完整 `ingest-plan.json`。不要直接修改源文档，不要把讲解词原文、blocks JSON 或生成的 wiki 内容提交到 Git。
 ```
 
 计划结构如下：

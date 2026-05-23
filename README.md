@@ -21,9 +21,11 @@ python ingest_wiki.py extract path/to/your-real-source.docx --out source.blocks.
 python ingest_wiki.py materialize ingest-plan.json --wiki wiki --dry-run
 python ingest_wiki.py materialize ingest-plan.json --wiki wiki --apply
 python ingest_wiki.py validate --wiki wiki
+python ingest_wiki.py serve --wiki wiki --port 8888
 ```
 
 `source.docx` in examples is a placeholder. Replace it with an existing local file path.
+Use `serve` for local preview after `npx quartz build`; plain `python -m http.server` does not resolve Quartz clean URLs to `.html` files.
 
 ## License
 

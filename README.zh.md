@@ -178,6 +178,28 @@ npx quartz build
 
 Quartz 会把 `wiki/content` 中的 Markdown 构建成 HTML。
 
+### 7. 本地预览 HTML
+
+不要直接用 `python -m http.server` 预览 Quartz 输出。Quartz 页面链接通常是 clean URL，例如 `/exhibits/changsheng-wuji-wadang`，但普通 `http.server` 不会自动映射到 `exhibits/changsheng-wuji-wadang.html`，具体页面容易 404。
+
+请回到本仓库根目录运行：
+
+```powershell
+python ingest_wiki.py serve --wiki ".\wiki" --port 8888
+```
+
+然后打开：
+
+```text
+http://127.0.0.1:8888/
+```
+
+具体页面可以用 clean URL：
+
+```text
+http://127.0.0.1:8888/exhibits/changsheng-wuji-wadang
+```
+
 ## 整体业务逻辑
 
 ### 1. 文档解析层

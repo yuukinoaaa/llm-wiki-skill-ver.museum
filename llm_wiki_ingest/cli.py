@@ -8,6 +8,7 @@ from json import JSONDecodeError
 
 from .extractors import extract_document, write_extracted_json
 from .materialize import materialize_plan
+from .serve import serve_wiki
 from .validate import validate_wiki
 
 
@@ -27,6 +28,11 @@ def main(argv: list[str] | None = None) -> int:
 
     validate_parser = subparsers.add_parser("validate", help="Validate generated wiki links and metadata.")
     validate_parser.add_argument("--wiki", required=True, help="Quartz wiki directory.")
+
+    serve_parser = subparsers.add_parser("serve", help="Serve Quartz public output with clean URL support.")
+    serve_parser.add_argument("--wiki", required=True, help="Quartz wiki directory.")
+    serve_parser.add_argument("--host", default="127.0.0.1", help="Bind host. Default: 127.0.0.1.")
+    serve_parser.add_argument("--port", type=int, default=8888, help="Bind port. Default: 8888.")
 
     args = parser.parse_args(argv)
     if args.command == "extract":
@@ -67,6 +73,17 @@ def main(argv: list[str] | None = None) -> int:
                 print(issue, file=sys.stderr)
             return 1
         print("Validation passed")
+        return 0
+
+    if args.command == "serve":
+        try:
+            serve_wiki(args.wiki, host=args.host, port=args.port)
+        except FileNotFoundError as error:
+            print(error, file=sys.stderr)
+            return 1
+        except KeyboardInterrupt:
+            print("\nServer stopped")
+            return 0
         return 0
 
     return 2

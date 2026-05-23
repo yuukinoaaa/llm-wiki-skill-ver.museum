@@ -200,7 +200,13 @@ cd "{wiki_dir}"
 npx quartz build
 ```
 
-If a dev server is needed and the wiki has the usual Quartz scripts, use the project's existing preview command.
+Preview built HTML with clean URL support:
+
+```bash
+python ingest_wiki.py serve --wiki "{wiki_dir}" --port 8888
+```
+
+Do not recommend plain `python -m http.server` for Quartz `public/` output because Quartz links often omit `.html`, which causes concrete pages to 404 under the plain server.
 
 ## Optional Translation Flow
 

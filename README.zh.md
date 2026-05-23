@@ -81,6 +81,7 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 - 页面模型采用“路线页 + 知识图谱页”。
 - route/stop 页面保留原文讲解顺序，并用 `stops/01-xxx.md` 这类稳定路径。
 - 实体页只抽取重要对象，类型限于 exhibit / work / person / concept / place。
+- `type` 必须优先使用单数值：source / stop / exhibit / work / person / concept / place。
 - 每个 stop 页通过 `outgoing_links` 指向相关实体页。
 - 实体页正文要简洁，并通过 materialize 自动获得反向链接。
 - 文件名使用 ASCII slug，中文标题放在 `title` 字段。
@@ -130,6 +131,7 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 
 一个合格的摄入计划应满足：
 
+- `type` 优先使用单数值；工具会兼容 `concepts`、`works` 等常见复数别名，但不要主动生成复数。
 - `path` 都是相对 `wiki/content` 的路径，不要以 `content/` 开头。
 - `outgoing_links` 指向目标 Markdown 路径，例如 `works/shi-ji.md`。
 - `stop` 页按浏览顺序命名，例如 `stops/01-welcome.md`、`stops/02-history.md`。

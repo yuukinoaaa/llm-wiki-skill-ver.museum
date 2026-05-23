@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from json import JSONDecodeError
 
 from .extractors import extract_document, write_extracted_json
 from .materialize import materialize_plan
@@ -44,8 +45,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "materialize":
-        plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
-        summary = materialize_plan(plan, args.wiki, apply=args.apply)
+        try:
+            plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+            summary = materialize_plan(plan, args.wiki, apply=args.apply)
+        except FileNotFoundError:
+            print(f"Plan file not found: {args.plan}", file=sys.stderr)
+            return 1
+        except JSONDecodeError as error:
+            print(f"Plan JSON error in {args.plan}: {error}", file=sys.stderr)
+            return 1
+        except ValueError as error:
+            print(f"Plan error: {error}", file=sys.stderr)
+            return 1
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
 

@@ -147,6 +147,32 @@ class MaterializeTests(unittest.TestCase):
             self.assertEqual(summary["would_create"], 1)
             self.assertFalse((wiki / "content").exists())
 
+    def test_materialize_accepts_plural_page_type_aliases(self) -> None:
+        plan = {
+            "source_id": "source-demo",
+            "source_hash": "abc123",
+            "topic": "demo-topic",
+            "pages": [
+                {
+                    "type": "concepts",
+                    "path": "concepts/version-culture.md",
+                    "title": "版本文化",
+                    "body_md": "版本文化概念。",
+                    "source_block_ids": ["b0001"],
+                    "outgoing_links": [],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            materialize_plan(plan, wiki, apply=True)
+
+            page = (wiki / "content" / "concepts" / "version-culture.md").read_text(encoding="utf-8")
+            manifest = json.loads((wiki / "llm-wiki-manifest.json").read_text(encoding="utf-8"))
+            self.assertIn('type: "concept"', page)
+            self.assertEqual(manifest["pages"]["concepts/version-culture.md"]["type"], "concept")
+
 
 class ValidateTests(unittest.TestCase):
     def test_validate_reports_broken_wikilinks_and_missing_frontmatter(self) -> None:

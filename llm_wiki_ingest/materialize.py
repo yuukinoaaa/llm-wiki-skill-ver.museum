@@ -8,6 +8,18 @@ from typing import Any, Mapping
 
 
 VALID_PAGE_TYPES = {"source", "stop", "exhibit", "work", "person", "concept", "place", "index"}
+PAGE_TYPE_ALIASES = {
+    "sources": "source",
+    "stops": "stop",
+    "exhibits": "exhibit",
+    "works": "work",
+    "people": "person",
+    "persons": "person",
+    "concepts": "concept",
+    "places": "place",
+    "indexes": "index",
+    "indices": "index",
+}
 
 
 def materialize_plan(plan: Mapping[str, Any], wiki_dir: str | Path, apply: bool = False) -> dict[str, int]:
@@ -56,8 +68,7 @@ def _normalize_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
         for key in ["type", "path", "title", "body_md"]:
             if key not in page:
                 raise ValueError(f"Missing page field: {key}")
-        if page["type"] not in VALID_PAGE_TYPES:
-            raise ValueError(f"Unsupported page type: {page['type']}")
+        page["type"] = _normalize_page_type(page["type"])
         page["path"] = _normalize_page_path(page["path"])
         page["source_block_ids"] = list(page.get("source_block_ids", []))
         page["outgoing_links"] = [_normalize_page_path(link) for link in page.get("outgoing_links", [])]
@@ -68,6 +79,15 @@ def _normalize_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
         "topic": str(plan["topic"]),
         "pages": pages,
     }
+
+
+def _normalize_page_type(value: object) -> str:
+    page_type = str(value).strip().lower()
+    page_type = PAGE_TYPE_ALIASES.get(page_type, page_type)
+    if page_type not in VALID_PAGE_TYPES:
+        valid = ", ".join(sorted(VALID_PAGE_TYPES | set(PAGE_TYPE_ALIASES)))
+        raise ValueError(f"Unsupported page type: {value}. Supported values: {valid}")
+    return page_type
 
 
 def _normalize_page_path(value: str) -> str:

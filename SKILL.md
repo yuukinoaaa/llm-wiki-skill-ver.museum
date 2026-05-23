@@ -139,6 +139,7 @@ After the user confirms, output valid JSON only. Keep these constraints:
 
 - `source_hash` must equal `source.sha256` from the extracted blocks JSON.
 - `source_block_ids` must use real block ids from the extracted JSON.
+- `type` should use singular values: `source`, `stop`, `exhibit`, `work`, `person`, `concept`, `place`.
 - `path` is relative to the Quartz `content` root and must not start with `content/`.
 - `path` should use ASCII slugs, for example `stops/01-welcome.md` or `works/shi-ji.md`.
 - Chinese titles belong in `title`, not in the file path.

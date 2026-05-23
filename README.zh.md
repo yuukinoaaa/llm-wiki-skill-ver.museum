@@ -39,8 +39,16 @@ npm install
 
 ### 1. 抽取文档
 
+这里的 `source.docx` 是占位符，必须替换成真实文件名或真实路径。先在当前目录查看可摄入文档：
+
 ```powershell
-python ingest_wiki.py extract ".\source.docx" --out ".\source.blocks.json"
+Get-ChildItem -File -Include *.docx,*.pdf,*.md,*.txt
+```
+
+例如当前目录里有 `展览讲解词.docx`，就运行：
+
+```powershell
+python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.blocks.json"
 ```
 
 输出文件包含：
@@ -50,7 +58,42 @@ python ingest_wiki.py extract ".\source.docx" --out ".\source.blocks.json"
 
 ### 2. 让 Claude Code 生成摄入计划
 
-把 `source.blocks.json` 交给 Claude Code，并要求它生成 `ingest-plan.json`。计划结构如下：
+`extract` 只负责把原文抽成文本块，不会自动判断哪些内容应该变成页面。下一步需要让 Claude Code 读取 `*.blocks.json`，生成一个明确的 `ingest-plan.json`。
+
+推荐做法：
+
+1. 让 Claude Code 读取刚生成的 `*.blocks.json`。
+2. 要求它先给出摄入计划摘要，包括将创建的路线页、实体页和主要互链。
+3. 你确认摘要后，再让它输出完整 JSON。
+4. 将 JSON 保存为 `ingest-plan.json`。
+
+可以直接复制这段提示词给 Claude Code：
+
+```text
+请读取 `展览讲解词.blocks.json`，为 llm-wiki 生成一个摄入计划 JSON。
+
+要求：
+- 只基于 blocks 中的内容，不联网补充。
+- 中文为主文，不生成双语翻译块。
+- 页面模型采用“路线页 + 知识图谱页”。
+- route/stop 页面保留原文讲解顺序，并用 `stops/01-xxx.md` 这类稳定路径。
+- 实体页只抽取重要对象，类型限于 exhibit / work / person / concept / place。
+- 每个 stop 页通过 `outgoing_links` 指向相关实体页。
+- 实体页正文要简洁，并通过 materialize 自动获得反向链接。
+- 文件名使用 ASCII slug，中文标题放在 `title` 字段。
+- `source_hash` 使用 blocks JSON 里的 `source.sha256`。
+- `source_block_ids` 必须引用对应的 block id，例如 `b0001`。
+
+请先输出“摄入计划摘要”，列出：
+1. 预计创建的 stop 页面
+2. 预计创建的实体页面
+3. 关键互链
+4. 可能需要人工确认的歧义
+
+我确认后，再输出完整 `ingest-plan.json`。
+```
+
+计划结构如下：
 
 ```json
 {
@@ -81,6 +124,14 @@ python ingest_wiki.py extract ".\source.docx" --out ".\source.blocks.json"
 | `person` | 人物 |
 | `concept` | 概念 |
 | `place` | 地点 |
+
+一个合格的摄入计划应满足：
+
+- `path` 都是相对 `wiki/content` 的路径，不要以 `content/` 开头。
+- `outgoing_links` 指向目标 Markdown 路径，例如 `works/shi-ji.md`。
+- `stop` 页按浏览顺序命名，例如 `stops/01-welcome.md`、`stops/02-history.md`。
+- 同一个典籍、人物或概念不要重复建页；多个讲解点都可链接到同一个实体页。
+- 不确定是否应新建实体页时，先在摘要中标出，让用户确认。
 
 ### 3. Dry-run 检查
 

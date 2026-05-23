@@ -17,11 +17,13 @@ Translation is disabled by default. Use `translate_wiki.py` only when explicitly
 ## Commands
 
 ```bash
-python ingest_wiki.py extract source.docx --out source.blocks.json
+python ingest_wiki.py extract path/to/your-real-source.docx --out source.blocks.json
 python ingest_wiki.py materialize ingest-plan.json --wiki wiki --dry-run
 python ingest_wiki.py materialize ingest-plan.json --wiki wiki --apply
 python ingest_wiki.py validate --wiki wiki
 ```
+
+`source.docx` in examples is a placeholder. Replace it with an existing local file path.
 
 ## License
 

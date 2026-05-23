@@ -127,6 +127,24 @@ For exhibition scripts, use the route-plus-knowledge-graph model:
 - route pages link to entities
 - entity pages link back to route pages
 
+When asked to generate a plan, first produce a short plan summary before writing JSON:
+
+- route/stop pages to create, in order
+- entity pages to create or reuse
+- key `outgoing_links`
+- source block ranges used by each page
+- ambiguous items needing user confirmation
+
+After the user confirms, output valid JSON only. Keep these constraints:
+
+- `source_hash` must equal `source.sha256` from the extracted blocks JSON.
+- `source_block_ids` must use real block ids from the extracted JSON.
+- `path` is relative to the Quartz `content` root and must not start with `content/`.
+- `path` should use ASCII slugs, for example `stops/01-welcome.md` or `works/shi-ji.md`.
+- Chinese titles belong in `title`, not in the file path.
+- `outgoing_links` should use Markdown paths such as `works/shi-ji.md`.
+- Do not duplicate the same person/work/concept page under different names.
+
 ## Phase 4: Review Before Writing
 
 Before writing files, summarize:

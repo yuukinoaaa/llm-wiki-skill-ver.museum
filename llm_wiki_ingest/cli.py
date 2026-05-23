@@ -29,7 +29,14 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command == "extract":
-        document = extract_document(args.source)
+        try:
+            document = extract_document(args.source)
+        except FileNotFoundError as error:
+            _print_missing_source_error(Path(error.filename or args.source))
+            return 1
+        except ValueError as error:
+            print(f"Input error: {error}", file=sys.stderr)
+            return 1
         if args.out:
             write_extracted_json(document, args.out)
         else:
@@ -52,6 +59,26 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     return 2
+
+
+def _print_missing_source_error(path: Path) -> None:
+    candidates = _find_candidate_sources(path.parent if path.parent != Path("") else Path.cwd())
+    print(f"Input file not found: {path}", file=sys.stderr)
+    print(f"Current directory: {Path.cwd()}", file=sys.stderr)
+    print("Use the real document path instead of the README placeholder `source.docx`.", file=sys.stderr)
+    if candidates:
+        print("Candidate source files in the same directory:", file=sys.stderr)
+        for candidate in candidates[:10]:
+            print(f"  - {candidate.name}", file=sys.stderr)
+    else:
+        print("No DOCX/PDF/MD/TXT candidates found in the same directory.", file=sys.stderr)
+
+
+def _find_candidate_sources(directory: Path) -> list[Path]:
+    if not directory.exists() or not directory.is_dir():
+        directory = Path.cwd()
+    extensions = {".docx", ".pdf", ".md", ".txt"}
+    return sorted(path for path in directory.iterdir() if path.is_file() and path.suffix.lower() in extensions)
 
 
 if __name__ == "__main__":

@@ -1,111 +1,226 @@
 # llm-wiki-skill
 
-一个 [Claude Code](https://claude.ai/code) Skill，用于构建和维护个人知识 Wiki，遵循 [Andrej Karpathy 的 LLM Wiki 模式](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)。
+`llm-wiki-skill` 用于把本地文档摄入为可浏览、可维护、互相连接的 Quartz Wiki。脚本负责稳定的机械工作，Claude Code 负责知识拆分、页面写作和互链判断。
 
-**English documentation: [README.md](./README.md)**
+当前版本面向“文档摄入优先”的工作流，适合把讲解词、研究材料、Markdown 笔记、文本型 PDF 等资料整理成结构化 Wiki。
 
----
+## 功能
 
-## 功能介绍
+- 支持 `DOCX / PDF / MD / TXT` 文档抽取。
+- 将不同格式统一为标准 JSON 文本块。
+- 通过摄入计划生成 Quartz Markdown 页面。
+- 支持“路线页 + 知识图谱页”结构。
+- 自动补充讲解点上一页/下一页导航。
+- 自动补充实体页反向链接。
+- 校验 wikilink 断链、页面 frontmatter 和 manifest。
+- 翻译默认关闭，中文源文档默认保持中文主文。
 
-把你的 Obsidian 笔记、PDF 和网页文章，自动整理成结构化、可搜索的 Wiki —— 基于 [Quartz v4](https://quartz.jzhao.xyz/) 构建，发布到 GitHub Pages。
+## 安装
 
-三个核心操作：
-- **Ingest（摄入）** — 导入源文件或 URL，自动生成 Wiki 页面
-- **Query（查询）** — 用自然语言向你的 Wiki 提问
-- **Lint（检查）** — 检测孤立页面、失效链接和知识空白
+需要 Python 3.11+。推荐创建虚拟环境：
 
-**双语支持**：每个页面都有中文翻译切换按钮（由智谱 GLM 或 DeepL 驱动）。
-
----
-
-## 安装步骤
-
-### 1. 安装 Skill
-
-```bash
-# 克隆到 Claude Code 的 skills 目录
-git clone https://github.com/kingqiu/llm-wiki-skill.git ~/.claude/skills/llm-wiki
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 ```
 
-### 2. 安装 Quartz（一次性）
+如果只处理 `DOCX / MD / TXT`，脚本大部分能力可使用标准库运行。`requirements.txt` 中的 `pypdf` 和 `pypinyin` 用于增强 PDF 抽取和中文标题转拼音 slug。
 
-```bash
-# 需要 Node.js v18+
-node --version
+Quartz 需要 Node.js 18+。你可以使用已有 Quartz 项目，也可以单独初始化：
 
-# 可以让 skill 在首次运行时自动初始化 Quartz，
-# 也可以手动操作：
-git clone https://github.com/jackyzha0/quartz.git ~/my-wiki
-cd ~/my-wiki
+```powershell
+git clone https://github.com/jackyzha0/quartz.git wiki
+cd wiki
 npm install
 ```
 
-### 3. 安装双语组件（可选）
+## 快速使用
 
-如果你想在 Wiki 中使用中文翻译切换按钮：
+### 1. 抽取文档
 
-```bash
-# 将 Bilingual 组件复制到你的 Quartz 安装目录
-cp ~/.claude/skills/llm-wiki/quartz-components/Bilingual.tsx ~/my-wiki/quartz/components/
-cp ~/.claude/skills/llm-wiki/quartz-components/scripts/bilingual.inline.ts ~/my-wiki/quartz/components/scripts/
+```powershell
+python ingest_wiki.py extract ".\source.docx" --out ".\source.blocks.json"
 ```
 
-然后按照 [quartz-components/SETUP.md](./quartz-components/SETUP.md) 的说明完成接入。
+输出文件包含：
 
-### 4. 首次运行
+- `source`：源文件路径、文件名、类型、SHA256。
+- `blocks`：按顺序编号的文本块，如 `b0001`、`b0002`。
 
-在任意目录打开 Claude Code，输入：
+### 2. 让 Claude Code 生成摄入计划
 
-```
-/llm-wiki
-```
+把 `source.blocks.json` 交给 Claude Code，并要求它生成 `ingest-plan.json`。计划结构如下：
 
-安装向导会引导你配置：
-- 知识库目录（Obsidian Vault 等）
-- Wiki 存放路径
-- GitHub Pages 地址（可选）
-- 翻译 API Key（智谱 AI 或 DeepL，可选）
-
-配置保存在 `~/.claude/skills/llm-wiki/config.md`（已加入 .gitignore，API Key 只留本地）。
-
----
-
-## 使用方法
-
-```
-/llm-wiki                              # 自动识别意图
-/llm-wiki 我想整理 RAG 相关的笔记      # 触发 Ingest 流程
-/llm-wiki wiki 里关于 memory 说了什么？ # 触发 Query 流程
-/llm-wiki 检查一下有没有失效的链接      # 触发 Lint 流程
+```json
+{
+  "source_id": "source-demo",
+  "source_hash": "abc123",
+  "topic": "demo-topic",
+  "pages": [
+    {
+      "type": "stop",
+      "path": "stops/01-welcome.md",
+      "title": "欢迎词",
+      "body_md": "页面正文。",
+      "source_block_ids": ["b0001"],
+      "outgoing_links": ["works/shi-ji.md"]
+    }
+  ]
+}
 ```
 
----
+支持的页面类型：
 
-## 批量翻译已有页面
+| type | 用途 |
+| --- | --- |
+| `source` | 原始文档来源页 |
+| `stop` | 讲解点、路线节点 |
+| `exhibit` | 展品 |
+| `work` | 典籍、作品 |
+| `person` | 人物 |
+| `concept` | 概念 |
+| `place` | 地点 |
 
-使用 `translate_wiki.py` 为所有现有页面添加中文翻译：
+### 3. Dry-run 检查
 
-```bash
-# 先修改脚本顶部的 CONTENT_DIR 路径
-python3 ~/.claude/skills/llm-wiki/translate_wiki.py
+```powershell
+python ingest_wiki.py materialize ".\ingest-plan.json" --wiki ".\wiki" --dry-run
 ```
 
-需要在 `config.md` 中配置智谱 AI API Key。
+dry-run 只报告将创建/更新多少页面，不写入文件。
 
----
+### 4. 写入 Wiki
 
-## 环境要求
+```powershell
+python ingest_wiki.py materialize ".\ingest-plan.json" --wiki ".\wiki" --apply
+```
 
-| 工具 | 版本要求 |
-|------|---------|
-| Claude Code | 最新版 |
-| Node.js | v18+ |
-| Git | 任意版本 |
-| 智谱 AI 或 DeepL API Key | 可选（双语功能需要） |
+写入位置：
 
----
+- Markdown 页面：`wiki/content/...`
+- manifest：`wiki/llm-wiki-manifest.json`
 
-## 开源协议
+### 5. 校验链接
 
-MIT
+```powershell
+python ingest_wiki.py validate --wiki ".\wiki"
+```
+
+校验内容：
+
+- 页面是否有 `title` 和 `type` frontmatter。
+- `[[wikilink]]` 是否指向存在的页面。
+- manifest 中登记的页面是否实际存在。
+
+### 6. 构建 HTML
+
+```powershell
+cd wiki
+npx quartz build
+```
+
+Quartz 会把 `wiki/content` 中的 Markdown 构建成 HTML。
+
+## 整体业务逻辑
+
+### 1. 文档解析层
+
+`llm_wiki_ingest.extractors` 负责读取 `DOCX / PDF / MD / TXT`，并统一输出文本块。每个块都有稳定编号，供后续页面追溯来源。
+
+### 2. LLM 编排层
+
+Claude Code 读取文本块，识别：
+
+- 讲解点或章节顺序。
+- 展品、典籍、人物、概念、地点。
+- 页面之间应有的 wikilink。
+- 哪些页面新建，哪些页面更新。
+
+这一步输出 `ingest-plan.json`，脚本不直接调用模型 API。
+
+### 3. Wiki 生成层
+
+`materialize` 根据摄入计划写入 Quartz Markdown：
+
+- 为讲解点页补充上一页/下一页。
+- 为正文中的相关实体补充 `[[path|标题]]`。
+- 为实体页补充反向链接。
+- 更新 `llm-wiki-manifest.json`。
+
+### 4. 构建层
+
+Quartz 负责把 Markdown 构建为最终 HTML。HTML 产物不建议提交到本仓库。
+
+## 翻译策略
+
+翻译默认关闭。
+
+默认配置：
+
+```yaml
+primary_engine: none
+fallback_engine: none
+bilingual_default: false
+```
+
+中文源文档默认不翻译，不自动生成英文或双语块。
+
+如需翻译已有英文页面，需要显式配置：
+
+```powershell
+$env:LLM_WIKI_TRANSLATION_ENGINE = "zhipu"
+$env:ZHIPU_API_KEY = "your-local-api-key"
+python translate_wiki.py --content-dir ".\wiki\content" --engine zhipu
+```
+
+`translate_wiki.py` 不再包含硬编码 API key 或个人路径。
+
+## 隐私与 Git
+
+默认 `.gitignore` 会排除：
+
+- 原始 `DOCX / PDF` 文档。
+- 本地生成的 `wiki/`。
+- 抽取出的 `*.blocks.json`。
+- 本地 `config.md`。
+
+如果源文档包含私有内容，只提交工具代码、测试、README、计划文档和配置模板。
+
+## 测试
+
+```powershell
+python -m unittest discover -v
+```
+
+测试覆盖：
+
+- DOCX/PDF/MD/TXT 抽取。
+- slug 生成。
+- 页面和 manifest 写入。
+- 双向链接生成。
+- 断链校验。
+- 翻译默认关闭。
+
+## 文件结构
+
+```text
+llm_wiki_ingest/
+  cli.py           # 命令行入口
+  extractors.py    # 文档抽取
+  materialize.py   # 根据摄入计划写入 wiki
+  models.py        # 数据结构
+  slug.py          # slug 生成
+  validate.py      # 链接和元数据校验
+ingest_wiki.py     # CLI 包装脚本
+translate_wiki.py  # 可选翻译工具，默认关闭
+tests/             # 单元测试
+docs/              # 计划和说明文档
+```
+
+## 后续方向
+
+- 增加正式 CLI 子命令封装和更完整的错误报告。
+- 为扫描版 PDF 增加 OCR 流程。
+- 在用户明确授权后增加联网补充和引用校验。
+- 可选增加 GitHub Pages 部署流程。

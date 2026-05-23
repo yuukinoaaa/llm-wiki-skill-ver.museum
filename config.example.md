@@ -1,44 +1,47 @@
 ---
-# LLM Wiki 配置文件模板
-# 复制此文件为 config.md，填入你自己的配置
-# config.md 已被 .gitignore 排除，API Key 不会上传到 GitHub
 configured: true
 ---
 
-# LLM Wiki 配置文件
+# LLM Wiki 配置文件模板
 
-此文件由 /llm-wiki 首次运行向导自动生成。如需修改，直接编辑对应字段即可。
+复制此文件为 `config.md` 后按本地环境修改。`config.md` 已被 `.gitignore` 排除，不会提交到 GitHub。
 
 ## Source Directories
-# 知识库目录（支持多个路径，每行一个）
-- /path/to/your/obsidian/Raw
-- /path/to/your/obsidian/Learning
+
+本地源文档目录。源文档只读，摄入流程不会修改这些文件。
+
+- C:/path/to/your/source-documents
 
 ## Wiki Directory
-/path/to/your/wiki
+
+Quartz Wiki 项目目录。示例：
+
+```text
+C:/path/to/your/wiki
+```
 
 ## GitHub Pages
-https://yourusername.github.io/YourWiki
+
+首版默认不配置 GitHub Pages。需要部署时再填写：
+
+```text
+https://yourname.github.io/your-wiki
+```
 
 ## Translation Settings
-# 翻译引擎优先级：依次尝试，第一个可用的生效
-# 可选值: deepl / zhipu / minimax / none（禁用翻译）
-primary_engine: zhipu
-fallback_engine: deepl
 
-# 双语模式默认开关（true=默认显示中文，false=默认隐藏）
+翻译默认关闭。中文文档摄入后默认生成中文主文，不自动生成双语内容。
+
+```yaml
+primary_engine: none
+fallback_engine: none
 bilingual_default: false
+```
 
-# ZhipuAI 配置（推荐，免费额度较大）
-# 申请地址：https://open.bigmodel.cn/
-zhipu_api_key: YOUR_ZHIPU_API_KEY_HERE
-zhipu_api_endpoint: https://open.bigmodel.cn/api/anthropic/v1/messages
-zhipu_model: GLM-4-Flash
+如需手动翻译已有英文页面，可显式启用 `translate_wiki.py`：
 
-# DeepL 配置（备用）
-# 申请地址：https://www.deepl.com/pro-api
-deepl_api_key:
-
-# MiniMax 配置（备用）
-minimax_api_key:
-minimax_api_endpoint:
+```powershell
+$env:LLM_WIKI_TRANSLATION_ENGINE = "zhipu"
+$env:ZHIPU_API_KEY = "your-local-api-key"
+python translate_wiki.py --content-dir C:/path/to/wiki/content --engine zhipu
+```

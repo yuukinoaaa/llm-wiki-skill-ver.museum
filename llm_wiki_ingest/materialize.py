@@ -30,6 +30,7 @@ def materialize_plan(plan: Mapping[str, Any], wiki_dir: str | Path, apply: bool 
     existing_manifest = _read_manifest(manifest_path)
 
     pages = deepcopy(normalized["pages"])
+    _append_stub_pages_for_missing_links(pages, content_dir)
     pages_by_path = {page["path"]: page for page in pages}
     title_by_target = {_target(page["path"]): page["title"] for page in pages}
 
@@ -49,7 +50,7 @@ def materialize_plan(plan: Mapping[str, Any], wiki_dir: str | Path, apply: bool 
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(_render_page(page, normalized), encoding="utf-8")
 
-    manifest = _merge_manifest(existing_manifest, normalized)
+    manifest = _merge_manifest(existing_manifest, {**normalized, "pages": pages})
     if apply:
         wiki.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -81,6 +82,34 @@ def _normalize_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _append_stub_pages_for_missing_links(pages: list[dict[str, Any]], content_dir: Path) -> None:
+    known_paths = {page["path"] for page in pages}
+    existing_paths = {
+        path.relative_to(content_dir).as_posix()
+        for path in content_dir.rglob("*.md")
+    } if content_dir.exists() else set()
+    stubs: dict[str, dict[str, Any]] = {}
+
+    for source in pages:
+        for raw_link in source.get("outgoing_links", []):
+            path = _normalize_page_path(raw_link)
+            if path in known_paths or path in existing_paths or path in stubs:
+                continue
+            stubs[path] = {
+                "type": _infer_page_type_from_path(path),
+                "path": path,
+                "title": _title_from_path(path),
+                "body_md": (
+                    "此页面由 `materialize` 根据摄入计划中的链接自动创建，用于避免 Wiki 出现断链。\n\n"
+                    "待补充：请根据源文档或后续考证补充此实体的正式说明。"
+                ),
+                "source_block_ids": list(source.get("source_block_ids", [])),
+                "outgoing_links": [],
+            }
+
+    pages.extend(stubs[path] for path in sorted(stubs))
+
+
 def _normalize_page_type(value: object) -> str:
     page_type = str(value).strip().lower()
     page_type = PAGE_TYPE_ALIASES.get(page_type, page_type)
@@ -88,6 +117,25 @@ def _normalize_page_type(value: object) -> str:
         valid = ", ".join(sorted(VALID_PAGE_TYPES | set(PAGE_TYPE_ALIASES)))
         raise ValueError(f"Unsupported page type: {value}. Supported values: {valid}")
     return page_type
+
+
+def _infer_page_type_from_path(path: str) -> str:
+    folder = path.split("/", 1)[0].lower()
+    folder_aliases = {
+        "sources": "source",
+        "stops": "stop",
+        "exhibits": "exhibit",
+        "works": "work",
+        "persons": "person",
+        "people": "person",
+        "concepts": "concept",
+        "places": "place",
+    }
+    return folder_aliases.get(folder, "concept")
+
+
+def _title_from_path(path: str) -> str:
+    return Path(path).stem.replace("_", "-")
 
 
 def _normalize_page_path(value: str) -> str:

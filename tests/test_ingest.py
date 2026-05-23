@@ -173,6 +173,39 @@ class MaterializeTests(unittest.TestCase):
             self.assertIn('type: "concept"', page)
             self.assertEqual(manifest["pages"]["concepts/version-culture.md"]["type"], "concept")
 
+    def test_materialize_creates_stub_pages_for_missing_outgoing_links(self) -> None:
+        plan = {
+            "source_id": "source-demo",
+            "source_hash": "abc123",
+            "topic": "demo-topic",
+            "pages": [
+                {
+                    "type": "stop",
+                    "path": "stops/01-welcome.md",
+                    "title": "欢迎词",
+                    "body_md": "第一段讲解。",
+                    "source_block_ids": ["b0001"],
+                    "outgoing_links": ["persons/qian-chu.md"],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            summary = materialize_plan(plan, wiki, apply=True)
+
+            stop = (wiki / "content" / "stops" / "01-welcome.md").read_text(encoding="utf-8")
+            stub = (wiki / "content" / "persons" / "qian-chu.md").read_text(encoding="utf-8")
+            manifest = json.loads((wiki / "llm-wiki-manifest.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(summary["created"], 2)
+            self.assertIn("[[persons/qian-chu|qian-chu]]", stop)
+            self.assertIn('type: "person"', stub)
+            self.assertIn("待补充", stub)
+            self.assertIn("[[stops/01-welcome|欢迎词]]", stub)
+            self.assertEqual(manifest["pages"]["persons/qian-chu.md"]["type"], "person")
+            self.assertEqual(validate_wiki(wiki), [])
+
 
 class ValidateTests(unittest.TestCase):
     def test_validate_reports_broken_wikilinks_and_missing_frontmatter(self) -> None:

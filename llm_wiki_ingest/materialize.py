@@ -31,6 +31,7 @@ def materialize_plan(plan: Mapping[str, Any], wiki_dir: str | Path, apply: bool 
 
     pages = deepcopy(normalized["pages"])
     _append_stub_pages_for_missing_links(pages, content_dir)
+    _append_index_page(pages, normalized)
     pages_by_path = {page["path"]: page for page in pages}
     title_by_target = {_target(page["path"]): page["title"] for page in pages}
 
@@ -108,6 +109,51 @@ def _append_stub_pages_for_missing_links(pages: list[dict[str, Any]], content_di
             }
 
     pages.extend(stubs[path] for path in sorted(stubs))
+
+
+def _append_index_page(pages: list[dict[str, Any]], plan: Mapping[str, Any]) -> None:
+    if any(page["path"] == "index.md" for page in pages):
+        return
+
+    grouped: dict[str, list[dict[str, Any]]] = {
+        "stop": [],
+        "exhibit": [],
+        "work": [],
+        "person": [],
+        "concept": [],
+        "place": [],
+    }
+    for page in pages:
+        if page["type"] in grouped:
+            grouped[page["type"]].append(page)
+
+    labels = {
+        "stop": "讲解路线",
+        "exhibit": "展品",
+        "work": "典籍与作品",
+        "person": "人物",
+        "concept": "概念",
+        "place": "地点",
+    }
+    sections = [f"# {plan['topic']}", "", "此首页由 `materialize` 自动生成，用于进入本地 Wiki。"]
+    for page_type, title in labels.items():
+        items = sorted(grouped[page_type], key=lambda item: item["path"])
+        if not items:
+            continue
+        sections.extend(["", f"## {title}"])
+        sections.extend(f"- {_link(item)}" for item in items)
+
+    pages.insert(
+        0,
+        {
+            "type": "index",
+            "path": "index.md",
+            "title": str(plan["topic"]),
+            "body_md": "\n".join(sections),
+            "source_block_ids": [],
+            "outgoing_links": [],
+        },
+    )
 
 
 def _normalize_page_type(value: object) -> str:

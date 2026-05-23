@@ -112,7 +112,7 @@ class MaterializeTests(unittest.TestCase):
             wiki = Path(tmp) / "wiki"
             summary = materialize_plan(plan, wiki, apply=True)
 
-            self.assertEqual(summary["created"], 3)
+            self.assertEqual(summary["created"], 4)
             stop_one = (wiki / "content" / "stops" / "01-welcome.md").read_text(encoding="utf-8")
             stop_two = (wiki / "content" / "stops" / "02-history.md").read_text(encoding="utf-8")
             work = (wiki / "content" / "works" / "shi-ji.md").read_text(encoding="utf-8")
@@ -144,7 +144,7 @@ class MaterializeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             wiki = Path(tmp) / "wiki"
             summary = materialize_plan(plan, wiki, apply=False)
-            self.assertEqual(summary["would_create"], 1)
+            self.assertEqual(summary["would_create"], 2)
             self.assertFalse((wiki / "content").exists())
 
     def test_materialize_accepts_plural_page_type_aliases(self) -> None:
@@ -198,13 +198,50 @@ class MaterializeTests(unittest.TestCase):
             stub = (wiki / "content" / "persons" / "qian-chu.md").read_text(encoding="utf-8")
             manifest = json.loads((wiki / "llm-wiki-manifest.json").read_text(encoding="utf-8"))
 
-            self.assertEqual(summary["created"], 2)
+            self.assertEqual(summary["created"], 3)
             self.assertIn("[[persons/qian-chu|qian-chu]]", stop)
             self.assertIn('type: "person"', stub)
             self.assertIn("待补充", stub)
             self.assertIn("[[stops/01-welcome|欢迎词]]", stub)
             self.assertEqual(manifest["pages"]["persons/qian-chu.md"]["type"], "person")
             self.assertEqual(validate_wiki(wiki), [])
+
+    def test_materialize_creates_index_page_for_homepage(self) -> None:
+        plan = {
+            "source_id": "source-demo",
+            "source_hash": "abc123",
+            "topic": "demo-topic",
+            "pages": [
+                {
+                    "type": "stop",
+                    "path": "stops/01-welcome.md",
+                    "title": "欢迎词",
+                    "body_md": "第一段讲解。",
+                    "source_block_ids": ["b0001"],
+                    "outgoing_links": [],
+                },
+                {
+                    "type": "work",
+                    "path": "works/shi-ji.md",
+                    "title": "史记",
+                    "body_md": "《史记》实体页。",
+                    "source_block_ids": ["b0002"],
+                    "outgoing_links": [],
+                },
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            materialize_plan(plan, wiki, apply=True)
+
+            index = (wiki / "content" / "index.md").read_text(encoding="utf-8")
+            manifest = json.loads((wiki / "llm-wiki-manifest.json").read_text(encoding="utf-8"))
+
+            self.assertIn('type: "index"', index)
+            self.assertIn("[[stops/01-welcome|欢迎词]]", index)
+            self.assertIn("[[works/shi-ji|史记]]", index)
+            self.assertEqual(manifest["pages"]["index.md"]["type"], "index")
 
 
 class ValidateTests(unittest.TestCase):

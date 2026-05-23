@@ -20,7 +20,12 @@ def resolve_public_path(public_dir: str | Path, request_path: str) -> Path | Non
         return None
 
     if not parts:
-        candidates = [public / "index.html"]
+        candidates = [
+            public / "index.html",
+            public / "stops" / "index.html",
+            public / "concepts" / "index.html",
+            public / "works" / "index.html",
+        ]
     else:
         relative = Path(*parts)
         direct = public / relative

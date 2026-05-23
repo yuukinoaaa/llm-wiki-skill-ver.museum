@@ -30,6 +30,15 @@ class CleanUrlResolutionTests(unittest.TestCase):
             self.assertEqual(resolve_public_path(public, "/concepts"), index.resolve())
             self.assertEqual(resolve_public_path(public, "/index.css"), css.resolve())
 
+    def test_root_falls_back_to_stops_index_when_homepage_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            public = Path(tmp)
+            (public / "stops").mkdir()
+            stops_index = public / "stops" / "index.html"
+            stops_index.write_text("<html></html>", encoding="utf-8")
+
+            self.assertEqual(resolve_public_path(public, "/"), stops_index.resolve())
+
     def test_rejects_path_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             public = Path(tmp)

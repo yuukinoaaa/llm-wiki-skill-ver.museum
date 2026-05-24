@@ -17,6 +17,8 @@
 - 实现形态：脚本 + skill 编排，后续再考虑完整 CLI。
 - 职责划分：脚本解析和写入，Claude Code 写作和互链。
 - 人工确认：先 dry-run 和审摄入计划，再 apply。
+- 链接质量：不再自动生成占位页，缺失 `outgoing_links` 目标直接失败。
+- 概念粒度：中等偏密，首轮目标约 20-35 个概念页。
 - Git 同步：功能分支推送，不直接推 `main`。
 - 部署范围：首版不配置 GitHub Pages。
 
@@ -31,6 +33,9 @@
 | 中文源文档 | 默认生成中文主文 |
 | HTML 生成 | Quartz build |
 | manifest | 维护 `llm-wiki-manifest.json` |
+| 占位页 | 不自动生成；旧占位页通过 `clean-stubs` 显式清理 |
+| 概念范围 | 版本学、工艺、分类体系、文献体裁、版本载体/形态 |
+| 概念命名 | 优先使用拼音 slug，避免英文同义重复 |
 | GitHub 同步 | 只同步工具代码、测试、README、计划文档、配置模板 |
 | 隐私边界 | 讲解词和派生 wiki 内容不进入 GitHub |
 
@@ -41,6 +46,9 @@
 - 实现 `extract`：抽取 DOCX/PDF/MD/TXT 为标准 JSON 文本块。
 - 实现 `materialize`：根据摄入计划写入 Quartz Markdown 页面和 manifest。
 - 实现 `validate`：检查 frontmatter、wikilink 断链和 manifest 页面存在性。
+- 改造 `materialize`：缺失链接目标直接失败，不再自动补占位页。
+- 新增 `clean-stubs`：显式清理旧版本生成的占位页。
+- 改造 `validate`：残留占位页视为校验错误。
 - 将 `translate_wiki.py` 改为可选工具，默认关闭翻译，移除硬编码 API key 和个人路径。
 - 更新 `config.example.md`，默认 `primary_engine: none`、`fallback_engine: none`、`bilingual_default: false`。
 - 重写 `SKILL.md`，聚焦文档摄入流程。
@@ -50,7 +58,7 @@
 ## 下一步计划
 
 1. 使用讲解词在本地生成私有 `wiki/`，验证路线页和实体页结构。
-2. 根据首个样例补充更细的摄入计划模板和提示词片段。
+2. 根据首个样例继续完善概念页正文和跨页链接。
 3. 增强 PDF 支持；扫描版 PDF 需要单独 OCR 流程。
 4. 为大型文档增加分页/分批摄入策略。
 5. 在用户明确授权后，增加联网补充和引用校验。
@@ -69,10 +77,11 @@ python -m unittest discover -v
 1. 使用讲解词执行 `extract`，输出本地私有 `*.blocks.json`。
 2. 由 Claude Code 生成摄入计划。
 3. 执行 `materialize --dry-run` 检查页面数量。
-4. 执行 `materialize --apply` 写入本地私有 `wiki/`。
-5. 执行 `validate --wiki wiki`。
-6. 在 Quartz 项目中执行 `npx quartz build`。
-7. 执行 `git status --short`，确认讲解词、抽取结果、私有 wiki 和 HTML 产物没有 staged。
+4. 如旧 wiki 中存在占位页，执行 `clean-stubs --dry-run` 和 `clean-stubs --apply`。
+5. 执行 `materialize --apply` 写入本地私有 `wiki/`。
+6. 执行 `validate --wiki wiki`。
+7. 在 Quartz 项目中执行 `npx quartz build`。
+8. 执行 `git status --short`，确认讲解词、抽取结果、私有 wiki 和 HTML 产物没有 staged。
 
 ## GitHub 同步原则
 

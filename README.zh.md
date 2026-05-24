@@ -12,7 +12,8 @@
 - 支持“路线页 + 知识图谱页”结构。
 - 自动补充讲解点上一页/下一页导航。
 - 自动补充实体页反向链接。
-- 校验 wikilink 断链、页面 frontmatter 和 manifest。
+- 不再自动生成占位页；`outgoing_links` 指向的页面必须显式存在于计划或当前 wiki 中。
+- 校验 wikilink 断链、占位页残留、页面 frontmatter 和 manifest。
 - 翻译默认关闭，中文源文档默认保持中文主文。
 
 ## 安装
@@ -81,10 +82,13 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 - 页面模型采用“路线页 + 知识图谱页”。
 - route/stop 页面保留原文讲解顺序，并用 `stops/01-xxx.md` 这类稳定路径。
 - 实体页只抽取重要对象，类型限于 exhibit / work / person / concept / place。
+- stop 可以是多个展品或典籍组成的路线节点，但其中每个展品、典籍、人物、地点、概念都要拆成独立实体页并逐个链接。
+- concept 采用中等偏密粒度，覆盖版本学、工艺、分类体系、文献体裁、版本载体/形态。
 - `type` 必须优先使用单数值：source / stop / exhibit / work / person / concept / place。
-- 每个 stop 页通过 `outgoing_links` 指向相关实体页。
+- 每个 stop 页通过 `outgoing_links` 指向相关实体页；所有目标页面必须在 `pages` 中定义，或者已经存在于 `wiki/content`。
 - 实体页正文要简洁，并通过 materialize 自动获得反向链接。
-- 文件名使用 ASCII slug，中文标题放在 `title` 字段。
+- 文件名使用 ASCII 拼音 slug，中文标题放在 `title` 字段，例如 `concepts/diaoban-yinshua.md`。
+- 不要生成英文同义重复页，例如 `printing-tech` 和 `printing-technology` 应合并为 `concepts/yinshua-jishu.md`。
 - `source_hash` 使用 blocks JSON 里的 `source.sha256`。
 - `source_block_ids` 必须引用对应的 block id，例如 `b0001`。
 
@@ -134,9 +138,19 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 - `type` 优先使用单数值；工具会兼容 `concepts`、`works` 等常见复数别名，但不要主动生成复数。
 - `path` 都是相对 `wiki/content` 的路径，不要以 `content/` 开头。
 - `outgoing_links` 指向目标 Markdown 路径，例如 `works/shi-ji.md`。
+- `outgoing_links` 不允许指向未定义页面；`materialize --dry-run` 和 `materialize --apply` 都会直接失败。
 - `stop` 页按浏览顺序命名，例如 `stops/01-welcome.md`、`stops/02-history.md`。
 - 同一个典籍、人物或概念不要重复建页；多个讲解点都可链接到同一个实体页。
+- 概念页由 Claude Code 在摄入计划阶段生成，脚本不会自动猜测或补空概念页。
 - 不确定是否应新建实体页时，先在摘要中标出，让用户确认。
+
+建议首轮概念数量控制在 20-35 个。优先抽取这些类型：
+
+- 版本学：版本、写本、印本、刻本、抄本。
+- 工艺：雕版印刷、活字印刷、石印、铅印、造纸技术、制墨技术、木刻水印、套色印刷。
+- 分类体系：经史子集、经部、史部、子部、集部、小学。
+- 文献体裁：类书、丛书、方志、家谱、舆图、校勘。
+- 版本载体/形态：刻符、金文、简牍、封泥、瓦当、碑刻、包背装。
 
 ### 3. Dry-run 检查
 
@@ -145,6 +159,15 @@ python ingest_wiki.py materialize ".\ingest-plan.json" --wiki ".\wiki" --dry-run
 ```
 
 dry-run 只报告将创建/更新多少页面，不写入文件。
+
+如果计划里的 `outgoing_links` 指向不存在的页面，dry-run 会失败并列出：
+
+```text
+Plan error: Missing outgoing link targets:
+- stops/01-welcome.md -> concepts/missing-concept.md
+```
+
+这时应回到 `ingest-plan.json`，补齐对应实体页，或删除不应该存在的链接。
 
 ### 4. 写入 Wiki
 
@@ -167,9 +190,26 @@ python ingest_wiki.py validate --wiki ".\wiki"
 
 - 页面是否有 `title` 和 `type` frontmatter。
 - `[[wikilink]]` 是否指向存在的页面。
+- 是否还残留旧版本 `materialize` 自动生成的占位页。
 - manifest 中登记的页面是否实际存在。
 
-### 6. 构建 HTML
+### 6. 清理旧占位页
+
+如果你之前用旧版本工具生成过 wiki，可能会留下自动占位页。先 dry-run 查看：
+
+```powershell
+python ingest_wiki.py clean-stubs --wiki ".\wiki" --dry-run
+```
+
+确认后删除：
+
+```powershell
+python ingest_wiki.py clean-stubs --wiki ".\wiki" --apply
+```
+
+该命令只删除包含固定占位标记的 Markdown 页面，不会删除正常页面。删除后需要修复 `ingest-plan.json` 中指向这些页面的链接，或为它们补充正式实体页，再重新执行 `materialize --apply` 和 `validate`。
+
+### 7. 构建 HTML
 
 ```powershell
 cd wiki
@@ -178,7 +218,7 @@ npx quartz build
 
 Quartz 会把 `wiki/content` 中的 Markdown 构建成 HTML。
 
-### 7. 本地预览 HTML
+### 8. 本地预览 HTML
 
 不要直接用 `python -m http.server` 预览 Quartz 输出。Quartz 页面链接通常是 clean URL，例如 `/exhibits/changsheng-wuji-wadang`，但普通 `http.server` 不会自动映射到 `exhibits/changsheng-wuji-wadang.html`，具体页面容易 404。
 
@@ -224,6 +264,7 @@ Claude Code 读取文本块，识别：
 - 为讲解点页补充上一页/下一页。
 - 为正文中的相关实体补充 `[[path|标题]]`。
 - 为实体页补充反向链接。
+- 检查 `outgoing_links` 是否都指向真实页面；不会自动创建占位页。
 - 更新 `llm-wiki-manifest.json`。
 
 ### 4. 构建层
@@ -278,6 +319,7 @@ python -m unittest discover -v
 - 页面和 manifest 写入。
 - 双向链接生成。
 - 断链校验。
+- 占位页清理与占位页残留校验。
 - 翻译默认关闭。
 
 ## 文件结构
@@ -289,6 +331,7 @@ llm_wiki_ingest/
   materialize.py   # 根据摄入计划写入 wiki
   models.py        # 数据结构
   slug.py          # slug 生成
+  stubs.py         # 旧占位页识别与清理
   validate.py      # 链接和元数据校验
 ingest_wiki.py     # CLI 包装脚本
 translate_wiki.py  # 可选翻译工具，默认关闭

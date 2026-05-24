@@ -173,7 +173,7 @@ class MaterializeTests(unittest.TestCase):
             self.assertIn('type: "concept"', page)
             self.assertEqual(manifest["pages"]["concepts/version-culture.md"]["type"], "concept")
 
-    def test_materialize_creates_stub_pages_for_missing_outgoing_links(self) -> None:
+    def test_materialize_fails_when_outgoing_link_target_is_missing(self) -> None:
         plan = {
             "source_id": "source-demo",
             "source_hash": "abc123",
@@ -192,19 +192,35 @@ class MaterializeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             wiki = Path(tmp) / "wiki"
-            summary = materialize_plan(plan, wiki, apply=True)
+            with self.assertRaisesRegex(ValueError, "Missing outgoing link targets"):
+                materialize_plan(plan, wiki, apply=True)
 
-            stop = (wiki / "content" / "stops" / "01-welcome.md").read_text(encoding="utf-8")
-            stub = (wiki / "content" / "persons" / "qian-chu.md").read_text(encoding="utf-8")
-            manifest = json.loads((wiki / "llm-wiki-manifest.json").read_text(encoding="utf-8"))
+            self.assertFalse((wiki / "content" / "persons" / "qian-chu.md").exists())
+            self.assertFalse((wiki / "llm-wiki-manifest.json").exists())
 
-            self.assertEqual(summary["created"], 3)
-            self.assertIn("[[persons/qian-chu|qian-chu]]", stop)
-            self.assertIn('type: "person"', stub)
-            self.assertIn("待补充", stub)
-            self.assertIn("[[stops/01-welcome|欢迎词]]", stub)
-            self.assertEqual(manifest["pages"]["persons/qian-chu.md"]["type"], "person")
-            self.assertEqual(validate_wiki(wiki), [])
+    def test_materialize_dry_run_fails_when_outgoing_link_target_is_missing(self) -> None:
+        plan = {
+            "source_id": "source-demo",
+            "source_hash": "abc123",
+            "topic": "demo-topic",
+            "pages": [
+                {
+                    "type": "stop",
+                    "path": "stops/01-welcome.md",
+                    "title": "Welcome",
+                    "body_md": "Intro.",
+                    "source_block_ids": ["b0001"],
+                    "outgoing_links": ["concepts/missing-concept.md"],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            with self.assertRaisesRegex(ValueError, "stops/01-welcome.md -> concepts/missing-concept.md"):
+                materialize_plan(plan, wiki, apply=False)
+
+            self.assertFalse((wiki / "content").exists())
 
     def test_materialize_creates_index_page_for_homepage(self) -> None:
         plan = {
@@ -243,6 +259,50 @@ class MaterializeTests(unittest.TestCase):
             self.assertIn("[[works/shi-ji|史记]]", index)
             self.assertEqual(manifest["pages"]["index.md"]["type"], "index")
 
+    def test_materialize_prunes_stale_manifest_pages_for_same_source(self) -> None:
+        first_plan = {
+            "source_id": "source-demo",
+            "source_hash": "abc123",
+            "topic": "demo-topic",
+            "pages": [
+                {
+                    "type": "concept",
+                    "path": "concepts/old.md",
+                    "title": "Old",
+                    "body_md": "Old concept.",
+                    "source_block_ids": [],
+                    "outgoing_links": [],
+                }
+            ],
+        }
+        second_plan = {
+            "source_id": "source-demo",
+            "source_hash": "abc123",
+            "topic": "demo-topic",
+            "pages": [
+                {
+                    "type": "concept",
+                    "path": "concepts/new.md",
+                    "title": "New",
+                    "body_md": "New concept.",
+                    "source_block_ids": [],
+                    "outgoing_links": [],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            materialize_plan(first_plan, wiki, apply=True)
+            (wiki / "content" / "concepts" / "old.md").unlink()
+            materialize_plan(second_plan, wiki, apply=True)
+
+            manifest = json.loads((wiki / "llm-wiki-manifest.json").read_text(encoding="utf-8"))
+
+            self.assertNotIn("concepts/old.md", manifest["pages"])
+            self.assertIn("concepts/new.md", manifest["pages"])
+            self.assertEqual(validate_wiki(wiki), [])
+
 
 class ValidateTests(unittest.TestCase):
     def test_validate_reports_broken_wikilinks_and_missing_frontmatter(self) -> None:
@@ -261,6 +321,21 @@ class ValidateTests(unittest.TestCase):
             self.assertIn("Broken link in index.md: [[missing/page|Missing]]", issues)
             self.assertIn("Missing frontmatter field in bad.md: title", issues)
             self.assertIn("Missing frontmatter field in bad.md: type", issues)
+
+    def test_validate_reports_materialize_stub_pages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            content = wiki / "content" / "concepts"
+            content.mkdir(parents=True)
+            (content / "placeholder.md").write_text(
+                "---\ntitle: placeholder\ntype: concept\n---\n\n"
+                "此页面由 `materialize` 根据摄入计划中的链接自动创建，用于避免 Wiki 出现断链。",
+                encoding="utf-8",
+            )
+
+            issues = validate_wiki(wiki)
+
+            self.assertIn("Materialize stub page remains: concepts/placeholder.md", issues)
 
 
 if __name__ == "__main__":

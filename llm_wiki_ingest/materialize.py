@@ -30,7 +30,7 @@ def materialize_plan(plan: Mapping[str, Any], wiki_dir: str | Path, apply: bool 
     existing_manifest = _read_manifest(manifest_path)
 
     pages = deepcopy(normalized["pages"])
-    _append_stub_pages_for_missing_links(pages, content_dir)
+    _validate_outgoing_link_targets(pages, content_dir)
     _append_index_page(pages, normalized)
     pages_by_path = {page["path"]: page for page in pages}
     title_by_target = {_target(page["path"]): page["title"] for page in pages}
@@ -83,32 +83,24 @@ def _normalize_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _append_stub_pages_for_missing_links(pages: list[dict[str, Any]], content_dir: Path) -> None:
+def _validate_outgoing_link_targets(pages: list[dict[str, Any]], content_dir: Path) -> None:
     known_paths = {page["path"] for page in pages}
     existing_paths = {
         path.relative_to(content_dir).as_posix()
         for path in content_dir.rglob("*.md")
     } if content_dir.exists() else set()
-    stubs: dict[str, dict[str, Any]] = {}
+    missing: list[str] = []
 
     for source in pages:
         for raw_link in source.get("outgoing_links", []):
             path = _normalize_page_path(raw_link)
-            if path in known_paths or path in existing_paths or path in stubs:
+            if path in known_paths or path in existing_paths:
                 continue
-            stubs[path] = {
-                "type": _infer_page_type_from_path(path),
-                "path": path,
-                "title": _title_from_path(path),
-                "body_md": (
-                    "此页面由 `materialize` 根据摄入计划中的链接自动创建，用于避免 Wiki 出现断链。\n\n"
-                    "待补充：请根据源文档或后续考证补充此实体的正式说明。"
-                ),
-                "source_block_ids": list(source.get("source_block_ids", [])),
-                "outgoing_links": [],
-            }
+            missing.append(f"{source['path']} -> {path}")
 
-    pages.extend(stubs[path] for path in sorted(stubs))
+    if missing:
+        details = "\n".join(f"- {item}" for item in sorted(missing))
+        raise ValueError(f"Missing outgoing link targets:\n{details}")
 
 
 def _append_index_page(pages: list[dict[str, Any]], plan: Mapping[str, Any]) -> None:
@@ -163,25 +155,6 @@ def _normalize_page_type(value: object) -> str:
         valid = ", ".join(sorted(VALID_PAGE_TYPES | set(PAGE_TYPE_ALIASES)))
         raise ValueError(f"Unsupported page type: {value}. Supported values: {valid}")
     return page_type
-
-
-def _infer_page_type_from_path(path: str) -> str:
-    folder = path.split("/", 1)[0].lower()
-    folder_aliases = {
-        "sources": "source",
-        "stops": "stop",
-        "exhibits": "exhibit",
-        "works": "work",
-        "persons": "person",
-        "people": "person",
-        "concepts": "concept",
-        "places": "place",
-    }
-    return folder_aliases.get(folder, "concept")
-
-
-def _title_from_path(path: str) -> str:
-    return Path(path).stem.replace("_", "-")
 
 
 def _normalize_page_path(value: str) -> str:
@@ -271,14 +244,23 @@ def _merge_manifest(existing: dict[str, Any], plan: Mapping[str, Any]) -> dict[s
     manifest.setdefault("schema_version", "llm-wiki-manifest.v1")
     manifest.setdefault("sources", {})
     manifest.setdefault("pages", {})
-    manifest["sources"][plan["source_id"]] = {"hash": plan["source_hash"], "topic": plan["topic"]}
+    source_id = plan["source_id"]
+    current_paths = {page["path"] for page in plan["pages"]}
+    for page_path, record in list(manifest["pages"].items()):
+        source_ids = record.get("source_ids", [])
+        if source_id in source_ids and page_path not in current_paths:
+            record["source_ids"] = [item for item in source_ids if item != source_id]
+            if not record["source_ids"]:
+                del manifest["pages"][page_path]
+
+    manifest["sources"][source_id] = {"hash": plan["source_hash"], "topic": plan["topic"]}
     for page in plan["pages"]:
         record = manifest["pages"].setdefault(page["path"], {"source_ids": []})
         record["title"] = page["title"]
         record["type"] = page["type"]
         record.setdefault("source_ids", [])
-        if plan["source_id"] not in record["source_ids"]:
-            record["source_ids"].append(plan["source_id"])
+        if source_id not in record["source_ids"]:
+            record["source_ids"].append(source_id)
     return manifest
 
 

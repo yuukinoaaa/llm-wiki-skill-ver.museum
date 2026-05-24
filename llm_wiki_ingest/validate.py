@@ -4,6 +4,8 @@ import json
 import re
 from pathlib import Path
 
+from .stubs import find_stub_pages
+
 
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 
@@ -30,6 +32,9 @@ def validate_wiki(wiki_dir: str | Path) -> list[str]:
                 continue
             if target not in existing_targets:
                 issues.append(f"Broken link in {rel}: [[{raw_link}]]")
+
+    for stub in find_stub_pages(wiki):
+        issues.append(f"Materialize stub page remains: {stub.relative_to(content).as_posix()}")
 
     issues.extend(_validate_manifest(wiki, existing_targets))
     return issues

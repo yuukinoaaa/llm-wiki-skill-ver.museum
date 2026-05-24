@@ -9,6 +9,7 @@ from json import JSONDecodeError
 from .extractors import extract_document, write_extracted_json
 from .materialize import materialize_plan
 from .serve import serve_wiki
+from .stubs import clean_stub_pages
 from .validate import validate_wiki
 
 
@@ -28,6 +29,11 @@ def main(argv: list[str] | None = None) -> int:
 
     validate_parser = subparsers.add_parser("validate", help="Validate generated wiki links and metadata.")
     validate_parser.add_argument("--wiki", required=True, help="Quartz wiki directory.")
+
+    clean_stubs_parser = subparsers.add_parser("clean-stubs", help="Delete materialize-created stub pages.")
+    clean_stubs_parser.add_argument("--wiki", required=True, help="Quartz wiki directory.")
+    clean_stubs_parser.add_argument("--apply", action="store_true", help="Delete files. Without this flag, runs dry-run.")
+    clean_stubs_parser.add_argument("--dry-run", action="store_true", help="Dry-run alias for readability.")
 
     serve_parser = subparsers.add_parser("serve", help="Serve Quartz public output with clean URL support.")
     serve_parser.add_argument("--wiki", required=True, help="Quartz wiki directory.")
@@ -73,6 +79,11 @@ def main(argv: list[str] | None = None) -> int:
                 print(issue, file=sys.stderr)
             return 1
         print("Validation passed")
+        return 0
+
+    if args.command == "clean-stubs":
+        summary = clean_stub_pages(args.wiki, apply=args.apply)
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "serve":

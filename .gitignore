@@ -1,4 +1,5 @@
 config.md
+.claude/
 wiki/
 public/
 source-documents/
@@ -11,3 +12,4 @@ ingest-plan.json
 *.pyc
 __pycache__/
 .pytest_cache/
+tests/

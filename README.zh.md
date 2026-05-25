@@ -289,6 +289,14 @@ http://127.0.0.1:8888/
 http://127.0.0.1:8888/exhibits/changsheng-wuji-wadang
 ```
 
+如果你当前已经 `cd wiki`，请使用：
+
+```powershell
+python ..\ingest_wiki.py serve --wiki "." --port 8888
+```
+
+本地 `wiki/ingest_wiki.py` 只是为了兼容误在 `wiki/` 目录里运行 `python ingest_wiki.py ...` 的转发脚本，属于私有 wiki 辅助文件，不会推送 GitHub。
+
 ## 整体业务逻辑
 
 ### 1. 文档解析层
@@ -370,7 +378,7 @@ python translate_wiki.py --content-dir ".\wiki\content" --engine zhipu
 - 抽取出的 `*.blocks.json`。
 - 本地 `config.md`。
 
-如果源文档包含私有内容，只提交工具代码、测试、README、计划文档和配置模板。
+如果源文档包含私有内容，只提交工具代码、README、计划文档和配置模板。`tests/` 和 `.claude/` 默认只保留在本地，不推送 GitHub。
 
 ## 测试
 
@@ -404,7 +412,7 @@ llm_wiki_ingest/
   validate.py      # 链接和元数据校验
 ingest_wiki.py     # CLI 包装脚本
 translate_wiki.py  # 可选翻译工具，默认关闭
-tests/             # 单元测试
+tests/             # 本地单元测试，默认不推送 GitHub
 docs/              # 计划和说明文档
 ```
 

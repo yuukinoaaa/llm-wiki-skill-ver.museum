@@ -43,7 +43,7 @@
 | 占位页 | 不自动生成；旧占位页通过 `clean-stubs` 显式清理 |
 | 概念范围 | 版本学、工艺、分类体系、文献体裁、版本载体/形态 |
 | 概念命名 | 优先使用拼音 slug，避免英文同义重复 |
-| GitHub 同步 | 只同步工具代码、测试、README、计划文档、配置模板 |
+| GitHub 同步 | 只同步工具代码、README、计划文档、配置模板 |
 | 隐私边界 | 讲解词、blocks、私有计划和派生 wiki 内容不进入 GitHub |
 
 ## 已完成计划
@@ -63,7 +63,7 @@
 - 更新 `config.example.md`，默认 `primary_engine: none`、`fallback_engine: none`、`bilingual_default: false`。
 - 重写 `SKILL.md`，聚焦文档摄入、互链、占位页清理和联网补充流程。
 - 重写中英文 README，其中中文 README 为主要使用文档。
-- 添加单元测试覆盖抽取、slug、页面生成、链接校验、占位页清理、联网补充和翻译默认关闭。
+- 添加本地单元测试覆盖抽取、slug、页面生成、链接校验、占位页清理、联网补充和翻译默认关闭。`tests/` 默认不推送 GitHub。
 
 ## 下一步计划
 
@@ -101,7 +101,6 @@ python -m unittest discover -v
 - `llm_wiki_ingest/`
 - `ingest_wiki.py`
 - `translate_wiki.py`
-- `tests/`
 - `README.md`
 - `README.zh.md`
 - `SKILL.md`
@@ -117,3 +116,5 @@ python -m unittest discover -v
 - 由讲解词生成的 `wiki/` 内容
 - Quartz `public/` HTML 产物
 - 本地密钥配置 `config.md`
+- `.claude/`
+- `tests/`

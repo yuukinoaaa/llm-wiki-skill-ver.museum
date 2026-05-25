@@ -279,6 +279,12 @@ Preview built HTML with clean URL support:
 python ingest_wiki.py serve --wiki "{wiki_dir}" --port 8888
 ```
 
+Run this from the repository root. If the shell is already inside the Quartz wiki directory, use:
+
+```bash
+python ../ingest_wiki.py serve --wiki "." --port 8888
+```
+
 Do not recommend plain `python -m http.server` for Quartz `public/` output because Quartz links often omit `.html`, which causes concrete pages to 404 under the plain server.
 
 ## Optional Translation Flow
@@ -297,6 +303,8 @@ Do not infer that translation is desired from the existence of `translate_wiki.p
 
 Do not stage or commit:
 
+- `.claude/`
+- `tests/`
 - source `.docx` / `.pdf`
 - extracted `*.blocks.json`
 - private local `wiki/`

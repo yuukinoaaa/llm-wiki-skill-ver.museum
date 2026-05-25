@@ -33,6 +33,8 @@ python ingest_wiki.py serve --wiki wiki --port 8888
 `source.docx` in examples is a placeholder. Replace it with an existing local file path.
 Use `serve` for local preview after `npx quartz build`; plain `python -m http.server` does not resolve Quartz clean URLs to `.html` files.
 
+Run commands from the repository root. If your shell is already inside `wiki/`, use `python ..\ingest_wiki.py serve --wiki . --port 8888`. Local `wiki/ingest_wiki.py` wrappers, `.claude/`, and `tests/` are ignored and are not pushed to GitHub.
+
 ## License
 
 MIT

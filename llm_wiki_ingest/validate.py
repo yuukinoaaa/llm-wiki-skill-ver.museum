@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from .stubs import find_stub_pages
+from .web_enrichment import ALLOWED_WEB_SOURCE_TYPES, WEB_SOURCE_REQUIRED_FIELDS
 
 
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
@@ -73,8 +74,29 @@ def _validate_manifest(wiki: Path, existing_targets: set[str]) -> list[str]:
         return []
     issues: list[str] = []
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    for page_path in manifest.get("pages", {}):
+    for page_path, record in manifest.get("pages", {}).items():
         target = page_path[:-3] if page_path.endswith(".md") else page_path
         if target not in existing_targets:
             issues.append(f"Manifest page missing from content: {page_path}")
+        issues.extend(_validate_manifest_web_sources(page_path, record))
+    return issues
+
+
+def _validate_manifest_web_sources(page_path: str, record: object) -> list[str]:
+    if not isinstance(record, dict) or "web_sources" not in record:
+        return []
+    issues: list[str] = []
+    web_sources = record["web_sources"]
+    if not isinstance(web_sources, list):
+        return [f"Manifest web_sources must be a list in {page_path}"]
+    for source in web_sources:
+        if not isinstance(source, dict):
+            issues.append(f"Manifest web source must be an object in {page_path}")
+            continue
+        for field in WEB_SOURCE_REQUIRED_FIELDS:
+            if field not in source or not str(source[field]).strip():
+                issues.append(f"Manifest web source missing field in {page_path}: {field}")
+        source_type = str(source.get("source_type", "")).strip().lower()
+        if source_type and source_type not in ALLOWED_WEB_SOURCE_TYPES:
+            issues.append(f"Manifest web source has unsupported source_type in {page_path}: {source_type}")
     return issues

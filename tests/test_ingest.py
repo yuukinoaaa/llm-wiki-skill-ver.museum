@@ -303,6 +303,145 @@ class MaterializeTests(unittest.TestCase):
             self.assertIn("concepts/new.md", manifest["pages"])
             self.assertEqual(validate_wiki(wiki), [])
 
+    def test_materialize_inserts_web_enrichment_callout_and_manifest_sources(self) -> None:
+        plan = {
+            "source_id": "source-demo",
+            "source_hash": "abc123",
+            "topic": "demo-topic",
+            "web_enrichment": {
+                "enabled": True,
+                "source_policy": "authoritative",
+                "density": "medium",
+                "query_policy": "entity_names_only",
+            },
+            "pages": [
+                {
+                    "type": "concept",
+                    "path": "concepts/muke-shuiyin.md",
+                    "title": "木刻水印",
+                    "body_md": "木刻水印也称木版水印。\n\n它用于复制书画风格。",
+                    "source_block_ids": ["b0001"],
+                    "outgoing_links": [],
+                    "web_enrichments": [
+                        {
+                            "anchor_text": "木刻水印也称木版水印",
+                            "content_md": "中国国家图书馆相关资料将木版水印列为传统复制技艺。",
+                            "sources": [
+                                {
+                                    "title": "中国国家图书馆",
+                                    "url": "https://www.nlc.cn/example",
+                                    "source_type": "library",
+                                    "accessed_at": "2026-05-25",
+                                },
+                                {
+                                    "title": "中国国家图书馆",
+                                    "url": "https://www.nlc.cn/example",
+                                    "source_type": "library",
+                                    "accessed_at": "2026-05-25",
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            materialize_plan(plan, wiki, apply=True)
+
+            page = (wiki / "content" / "concepts" / "muke-shuiyin.md").read_text(encoding="utf-8")
+            manifest = json.loads((wiki / "llm-wiki-manifest.json").read_text(encoding="utf-8"))
+            record = manifest["pages"]["concepts/muke-shuiyin.md"]
+
+            self.assertIn("木刻水印也称木版水印。\n\n> [!info] 联网补充", page)
+            self.assertIn("> 中国国家图书馆相关资料将木版水印列为传统复制技艺。", page)
+            self.assertIn("> 来源：[中国国家图书馆](https://www.nlc.cn/example)（library，访问：2026-05-25）", page)
+            self.assertEqual(
+                record["web_sources"],
+                [
+                    {
+                        "title": "中国国家图书馆",
+                        "url": "https://www.nlc.cn/example",
+                        "source_type": "library",
+                        "accessed_at": "2026-05-25",
+                    }
+                ],
+            )
+            self.assertEqual(validate_wiki(wiki), [])
+
+    def test_materialize_rejects_web_enrichment_when_anchor_is_missing(self) -> None:
+        plan = {
+            "source_id": "source-demo",
+            "source_hash": "abc123",
+            "topic": "demo-topic",
+            "pages": [
+                {
+                    "type": "concept",
+                    "path": "concepts/version.md",
+                    "title": "版本",
+                    "body_md": "版本概念。",
+                    "source_block_ids": [],
+                    "outgoing_links": [],
+                    "web_enrichments": [
+                        {
+                            "anchor_text": "不存在的锚点",
+                            "content_md": "补充内容。",
+                            "sources": [
+                                {
+                                    "title": "国家图书馆",
+                                    "url": "https://www.nlc.cn/example",
+                                    "source_type": "library",
+                                    "accessed_at": "2026-05-25",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            with self.assertRaisesRegex(ValueError, "Web enrichment anchor not found"):
+                materialize_plan(plan, wiki, apply=False)
+
+    def test_materialize_rejects_web_enrichment_with_invalid_source(self) -> None:
+        plan = {
+            "source_id": "source-demo",
+            "source_hash": "abc123",
+            "topic": "demo-topic",
+            "pages": [
+                {
+                    "type": "concept",
+                    "path": "concepts/version.md",
+                    "title": "版本",
+                    "body_md": "版本概念。",
+                    "source_block_ids": [],
+                    "outgoing_links": [],
+                    "web_enrichments": [
+                        {
+                            "anchor_text": "版本概念",
+                            "content_md": "补充内容。",
+                            "sources": [
+                                {
+                                    "title": "个人博客",
+                                    "url": "https://example.com",
+                                    "source_type": "blog",
+                                    "accessed_at": "2026-05-25",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            with self.assertRaisesRegex(ValueError, "Unsupported web source_type"):
+                materialize_plan(plan, wiki, apply=False)
+
 
 class ValidateTests(unittest.TestCase):
     def test_validate_reports_broken_wikilinks_and_missing_frontmatter(self) -> None:
@@ -336,6 +475,44 @@ class ValidateTests(unittest.TestCase):
             issues = validate_wiki(wiki)
 
             self.assertIn("Materialize stub page remains: concepts/placeholder.md", issues)
+
+    def test_validate_reports_invalid_manifest_web_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            wiki = Path(tmp) / "wiki"
+            content = wiki / "content"
+            content.mkdir(parents=True)
+            (content / "index.md").write_text(
+                "---\ntitle: 首页\ntype: index\n---\n\n正文。",
+                encoding="utf-8",
+            )
+            (wiki / "llm-wiki-manifest.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "llm-wiki-manifest.v1",
+                        "sources": {},
+                        "pages": {
+                            "index.md": {
+                                "title": "首页",
+                                "type": "index",
+                                "source_ids": ["source-demo"],
+                                "web_sources": [
+                                    {
+                                        "title": "个人博客",
+                                        "url": "https://example.com",
+                                        "source_type": "blog",
+                                    }
+                                ],
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            issues = validate_wiki(wiki)
+
+            self.assertIn("Manifest web source missing field in index.md: accessed_at", issues)
+            self.assertIn("Manifest web source has unsupported source_type in index.md: blog", issues)
 
 
 if __name__ == "__main__":

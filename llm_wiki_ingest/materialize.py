@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
+
+from .web_enrichment import ALLOWED_WEB_SOURCE_TYPES, WEB_SOURCE_REQUIRED_FIELDS, web_source_identity
 
 
 VALID_PAGE_TYPES = {"source", "stop", "exhibit", "work", "person", "concept", "place", "index"}
@@ -35,6 +38,7 @@ def materialize_plan(plan: Mapping[str, Any], wiki_dir: str | Path, apply: bool 
     pages_by_path = {page["path"]: page for page in pages}
     title_by_target = {_target(page["path"]): page["title"] for page in pages}
 
+    _append_web_enrichments(pages)
     _append_route_links(pages)
     _append_outgoing_sections(pages, title_by_target)
     _append_backlinks(pages, pages_by_path)
@@ -74,13 +78,73 @@ def _normalize_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
         page["path"] = _normalize_page_path(page["path"])
         page["source_block_ids"] = list(page.get("source_block_ids", []))
         page["outgoing_links"] = [_normalize_page_path(link) for link in page.get("outgoing_links", [])]
+        page["web_enrichments"] = _normalize_web_enrichments(page.get("web_enrichments", []), page["path"])
         pages.append(page)
+    web_enrichment = plan.get("web_enrichment", {})
+    if web_enrichment and not isinstance(web_enrichment, Mapping):
+        raise ValueError("Plan field web_enrichment must be an object")
     return {
         "source_id": str(plan["source_id"]),
         "source_hash": str(plan["source_hash"]),
         "topic": str(plan["topic"]),
+        "web_enrichment": dict(web_enrichment),
         "pages": pages,
     }
+
+
+def _normalize_web_enrichments(value: object, page_path: str) -> list[dict[str, Any]]:
+    if value in (None, []):
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"web_enrichments must be a list in {page_path}")
+
+    enrichments: list[dict[str, Any]] = []
+    for index, raw_enrichment in enumerate(value):
+        if not isinstance(raw_enrichment, Mapping):
+            raise ValueError(f"web_enrichments[{index}] must be an object in {page_path}")
+        for field in ["anchor_text", "content_md", "sources"]:
+            if field not in raw_enrichment:
+                raise ValueError(f"Missing web enrichment field in {page_path}: {field}")
+        anchor_text = str(raw_enrichment["anchor_text"]).strip()
+        content_md = str(raw_enrichment["content_md"]).strip()
+        if not anchor_text:
+            raise ValueError(f"web_enrichments[{index}] anchor_text cannot be empty in {page_path}")
+        if not content_md:
+            raise ValueError(f"web_enrichments[{index}] content_md cannot be empty in {page_path}")
+        sources = _normalize_web_sources(raw_enrichment["sources"], page_path)
+        enrichments.append(
+            {
+                "anchor_text": anchor_text,
+                "content_md": content_md,
+                "sources": sources,
+            }
+        )
+    return enrichments
+
+
+def _normalize_web_sources(value: object, page_path: str) -> list[dict[str, str]]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"web enrichment sources must be a non-empty list in {page_path}")
+
+    sources: list[dict[str, str]] = []
+    for index, raw_source in enumerate(value):
+        if not isinstance(raw_source, Mapping):
+            raise ValueError(f"web enrichment sources[{index}] must be an object in {page_path}")
+        for field in WEB_SOURCE_REQUIRED_FIELDS:
+            if field not in raw_source or not str(raw_source[field]).strip():
+                raise ValueError(f"Missing web source field in {page_path}: {field}")
+        source_type = str(raw_source["source_type"]).strip().lower()
+        if source_type not in ALLOWED_WEB_SOURCE_TYPES:
+            raise ValueError(f"Unsupported web source_type in {page_path}: {source_type}")
+        sources.append(
+            {
+                "title": str(raw_source["title"]).strip(),
+                "url": str(raw_source["url"]).strip(),
+                "source_type": source_type,
+                "accessed_at": str(raw_source["accessed_at"]).strip(),
+            }
+        )
+    return _dedupe_web_sources(sources)
 
 
 def _validate_outgoing_link_targets(pages: list[dict[str, Any]], content_dir: Path) -> None:
@@ -215,6 +279,40 @@ def _append_backlinks(pages: list[dict[str, Any]], pages_by_path: dict[str, dict
             _append_section(page, "## 关联页面\n" + "\n".join(lines))
 
 
+def _append_web_enrichments(pages: list[dict[str, Any]]) -> None:
+    for page in pages:
+        for enrichment in page.get("web_enrichments", []):
+            page["body_md"] = _insert_web_enrichment(page["body_md"], enrichment, page["path"])
+
+
+def _insert_web_enrichment(body_md: str, enrichment: Mapping[str, Any], page_path: str) -> str:
+    paragraphs = body_md.rstrip().split("\n\n")
+    anchor_text = str(enrichment["anchor_text"])
+    callout = _render_web_enrichment_callout(enrichment)
+    for index, paragraph in enumerate(paragraphs):
+        if anchor_text in paragraph:
+            paragraphs.insert(index + 1, callout)
+            return "\n\n".join(paragraphs)
+    raise ValueError(f"Web enrichment anchor not found in {page_path}: {anchor_text}")
+
+
+def _render_web_enrichment_callout(enrichment: Mapping[str, Any]) -> str:
+    lines = ["> [!info] 联网补充"]
+    for line in str(enrichment["content_md"]).splitlines():
+        lines.append("> " + line if line else ">")
+    lines.append(">")
+    source_links = "；".join(_web_source_link(source) for source in enrichment["sources"])
+    lines.append(f"> 来源：{source_links}")
+    return "\n".join(lines)
+
+
+def _web_source_link(source: Mapping[str, str]) -> str:
+    return (
+        f"[{source['title']}]({source['url']})"
+        f"（{source['source_type']}，访问：{source['accessed_at']}）"
+    )
+
+
 def _append_section(page: dict[str, Any], section: str) -> None:
     body = page["body_md"].rstrip()
     if section in body:
@@ -244,6 +342,8 @@ def _merge_manifest(existing: dict[str, Any], plan: Mapping[str, Any]) -> dict[s
     manifest.setdefault("schema_version", "llm-wiki-manifest.v1")
     manifest.setdefault("sources", {})
     manifest.setdefault("pages", {})
+    if plan.get("web_enrichment"):
+        manifest["web_enrichment"] = dict(plan["web_enrichment"])
     source_id = plan["source_id"]
     current_paths = {page["path"] for page in plan["pages"]}
     for page_path, record in list(manifest["pages"].items()):
@@ -261,7 +361,31 @@ def _merge_manifest(existing: dict[str, Any], plan: Mapping[str, Any]) -> dict[s
         record.setdefault("source_ids", [])
         if source_id not in record["source_ids"]:
             record["source_ids"].append(source_id)
+        web_sources = _web_sources_for_page(page)
+        if web_sources:
+            record["web_sources"] = web_sources
+        else:
+            record.pop("web_sources", None)
     return manifest
+
+
+def _web_sources_for_page(page: Mapping[str, Any]) -> list[dict[str, str]]:
+    sources: list[dict[str, str]] = []
+    for enrichment in page.get("web_enrichments", []):
+        sources.extend(enrichment.get("sources", []))
+    return _dedupe_web_sources(sources)
+
+
+def _dedupe_web_sources(sources: list[dict[str, str]]) -> list[dict[str, str]]:
+    deduped: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for source in sources:
+        identity = web_source_identity(source)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        deduped.append(dict(source))
+    return deduped
 
 
 def _read_manifest(path: Path) -> dict[str, Any]:

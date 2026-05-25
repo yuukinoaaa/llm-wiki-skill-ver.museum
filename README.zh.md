@@ -13,7 +13,8 @@
 - 自动补充讲解点上一页/下一页导航。
 - 自动补充实体页反向链接。
 - 不再自动生成占位页；`outgoing_links` 指向的页面必须显式存在于计划或当前 wiki 中。
-- 校验 wikilink 断链、占位页残留、页面 frontmatter 和 manifest。
+- 支持联网补充字段，由 Claude Code 检索权威来源并写入计划，脚本负责插入 Quartz callout。
+- 校验 wikilink 断链、占位页残留、页面 frontmatter、manifest 和联网来源字段。
 - 翻译默认关闭，中文源文档默认保持中文主文。
 
 ## 安装
@@ -66,7 +67,7 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 1. 在本仓库根目录打开 Claude Code。
 2. 明确要求 Claude Code 先阅读并使用本目录下的 `SKILL.md`，按 `/llm-wiki` 的文档摄入流程工作。
 3. 让 Claude Code 读取刚生成的 `*.blocks.json`。
-4. 要求它先给出摄入计划摘要，包括将创建的路线页、实体页和主要互链。
+4. 要求它先给出摄入计划摘要，包括将创建的路线页、实体页、主要互链和联网补充范围。
 5. 你确认摘要后，再让它输出完整 JSON。
 6. 将 JSON 保存为 `ingest-plan.json`。
 
@@ -77,7 +78,6 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 请先阅读 `SKILL.md`、`README.zh.md` 和 `展览讲解词.blocks.json`，然后为 llm-wiki 生成一个摄入计划 JSON。
 
 要求：
-- 只基于 blocks 中的内容，不联网补充。
 - 中文为主文，不生成双语翻译块。
 - 页面模型采用“路线页 + 知识图谱页”。
 - route/stop 页面保留原文讲解顺序，并用 `stops/01-xxx.md` 这类稳定路径。
@@ -91,12 +91,20 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 - 不要生成英文同义重复页，例如 `printing-tech` 和 `printing-technology` 应合并为 `concepts/yinshua-jishu.md`。
 - `source_hash` 使用 blocks JSON 里的 `source.sha256`。
 - `source_block_ids` 必须引用对应的 block id，例如 `b0001`。
+- 默认启用联网补充，但联网检索和写作由 Claude Code 完成，脚本不直接联网。
+- 检索查询只使用实体名、书名、概念名，不使用讲解词原文片段作为搜索词。
+- 优先使用权威来源，`source_type` 只允许 museum / library / university / government / encyclopedia / publisher；百科只作兜底。
+- 联网补充写入页面级 `web_enrichments`，每条必须有 `anchor_text`、`content_md` 和至少 1 个来源。
+- `anchor_text` 必须能在页面正文中找到，materialize 会把“联网补充” callout 插入该段落后。
+- 默认中等密度：stop 页每页 0-2 条，实体页和概念页每页约 1 条，不补首页 `index.md`。
+- 联网补充必须明确标注为补充内容，不要把它混入讲解词原文转述。
 
 请先输出“摄入计划摘要”，列出：
 1. 预计创建的 stop 页面
 2. 预计创建的实体页面
 3. 关键互链
-4. 可能需要人工确认的歧义
+4. 预计联网补充的页面、查询词和来源类型
+5. 可能需要人工确认的歧义
 
 我确认后，再输出完整 `ingest-plan.json`。不要直接修改源文档，不要把讲解词原文、blocks JSON 或生成的 wiki 内容提交到 Git。
 ```
@@ -108,6 +116,12 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
   "source_id": "source-demo",
   "source_hash": "abc123",
   "topic": "demo-topic",
+  "web_enrichment": {
+    "enabled": true,
+    "source_policy": "authoritative",
+    "density": "medium",
+    "query_policy": "entity_names_only"
+  },
   "pages": [
     {
       "type": "stop",
@@ -115,7 +129,21 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
       "title": "欢迎词",
       "body_md": "页面正文。",
       "source_block_ids": ["b0001"],
-      "outgoing_links": ["works/shi-ji.md"]
+      "outgoing_links": ["works/shi-ji.md"],
+      "web_enrichments": [
+        {
+          "anchor_text": "页面正文",
+          "content_md": "这里写转述后的联网补充内容。",
+          "sources": [
+            {
+              "title": "来源标题",
+              "url": "https://example.com",
+              "source_type": "library",
+              "accessed_at": "2026-05-25"
+            }
+          ]
+        }
+      ]
     }
   ]
 }
@@ -144,6 +172,24 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 - 概念页由 Claude Code 在摄入计划阶段生成，脚本不会自动猜测或补空概念页。
 - 不确定是否应新建实体页时，先在摘要中标出，让用户确认。
 
+联网补充字段规则：
+
+- 根级 `web_enrichment` 记录全局策略：`enabled: true`、`source_policy: authoritative`、`density: medium`、`query_policy: entity_names_only`。
+- 页面级 `web_enrichments` 是数组；没有补充内容的页面可以省略该字段或设为空数组。
+- 每条 `web_enrichments` 必须包含 `anchor_text`、`content_md`、`sources`。
+- `sources` 中每个来源必须包含 `title`、`url`、`source_type`、`accessed_at`。
+- 允许的 `source_type`：`museum`、`library`、`university`、`government`、`encyclopedia`、`publisher`。
+- 同一页面复用同一来源时，manifest 会按标题、URL、类型和访问日期去重。
+
+渲染效果示例：
+
+```md
+> [!info] 联网补充
+> 补充内容……
+>
+> 来源：[来源标题](https://example.com)（library，访问：2026-05-25）
+```
+
 建议首轮概念数量控制在 20-35 个。优先抽取这些类型：
 
 - 版本学：版本、写本、印本、刻本、抄本。
@@ -169,6 +215,8 @@ Plan error: Missing outgoing link targets:
 
 这时应回到 `ingest-plan.json`，补齐对应实体页，或删除不应该存在的链接。
 
+如果 `web_enrichments` 的 `anchor_text` 找不到、来源字段不完整，或 `source_type` 不在允许范围内，dry-run 也会失败。先修计划，再 apply。
+
 ### 4. 写入 Wiki
 
 ```powershell
@@ -192,6 +240,7 @@ python ingest_wiki.py validate --wiki ".\wiki"
 - `[[wikilink]]` 是否指向存在的页面。
 - 是否还残留旧版本 `materialize` 自动生成的占位页。
 - manifest 中登记的页面是否实际存在。
+- manifest 中的 `web_sources` 字段是否完整，`source_type` 是否属于允许的权威来源类型。
 
 ### 6. 清理旧占位页
 
@@ -254,8 +303,11 @@ Claude Code 读取文本块，识别：
 - 展品、典籍、人物、概念、地点。
 - 页面之间应有的 wikilink。
 - 哪些页面新建，哪些页面更新。
+- 需要联网补充的位置、查询词、权威来源和补充正文。
 
 这一步输出 `ingest-plan.json`，脚本不直接调用模型 API。
+
+联网补充也发生在这一层：Claude Code 负责用实体名、书名或概念名检索并转述权威来源；脚本只消费计划中的结构化 `web_enrichments`，不自己联网搜索。
 
 ### 3. Wiki 生成层
 
@@ -265,11 +317,25 @@ Claude Code 读取文本块，识别：
 - 为正文中的相关实体补充 `[[path|标题]]`。
 - 为实体页补充反向链接。
 - 检查 `outgoing_links` 是否都指向真实页面；不会自动创建占位页。
+- 根据 `anchor_text` 把联网补充插入正文附近的 Quartz callout。
+- 将外部来源写入 manifest 的 `web_sources`，同页去重。
 - 更新 `llm-wiki-manifest.json`。
 
 ### 4. 构建层
 
 Quartz 负责把 Markdown 构建为最终 HTML。HTML 产物不建议提交到本仓库。
+
+## 联网补充策略
+
+联网补充默认开启，但由 Claude Code 完成检索与写作，脚本不直接联网。这样可以把搜索判断、来源筛选和转述质量留给 LLM 编排层，同时让脚本保持可测试、可复现。
+
+规则：
+
+- 查询只使用实体名、书名、概念名，不使用讲解词原文片段。
+- 优先来源：博物馆、图书馆、高校、政府、出版社；百科只作兜底。
+- 补充内容必须使用“联网补充” callout 标注，不混入原文主体。
+- 内容以转述为主，短引文必须克制并带来源。
+- `validate` 只检查来源字段完整性和类型合法性，不联网验证 URL 可访问性。
 
 ## 翻译策略
 
@@ -320,6 +386,8 @@ python -m unittest discover -v
 - 双向链接生成。
 - 断链校验。
 - 占位页清理与占位页残留校验。
+- 联网补充 callout 插入。
+- manifest `web_sources` 写入、去重和字段校验。
 - 翻译默认关闭。
 
 ## 文件结构
@@ -332,6 +400,7 @@ llm_wiki_ingest/
   models.py        # 数据结构
   slug.py          # slug 生成
   stubs.py         # 旧占位页识别与清理
+  web_enrichment.py # 联网补充来源类型和去重规则
   validate.py      # 链接和元数据校验
 ingest_wiki.py     # CLI 包装脚本
 translate_wiki.py  # 可选翻译工具，默认关闭
@@ -343,5 +412,5 @@ docs/              # 计划和说明文档
 
 - 增加正式 CLI 子命令封装和更完整的错误报告。
 - 为扫描版 PDF 增加 OCR 流程。
-- 在用户明确授权后增加联网补充和引用校验。
+- 增加可选 URL 可达性检查和更细的来源质量报告。
 - 可选增加 GitHub Pages 部署流程。

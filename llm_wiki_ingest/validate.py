@@ -78,7 +78,27 @@ def _validate_manifest(wiki: Path, existing_targets: set[str]) -> list[str]:
         target = page_path[:-3] if page_path.endswith(".md") else page_path
         if target not in existing_targets:
             issues.append(f"Manifest page missing from content: {page_path}")
+        issues.extend(_validate_manifest_source_refs(page_path, record))
         issues.extend(_validate_manifest_web_sources(page_path, record))
+    return issues
+
+
+def _validate_manifest_source_refs(page_path: str, record: object) -> list[str]:
+    if not isinstance(record, dict) or "source_refs" not in record:
+        return []
+    source_refs = record["source_refs"]
+    if not isinstance(source_refs, list):
+        return [f"Manifest source_refs must be a list in {page_path}"]
+    issues: list[str] = []
+    for ref in source_refs:
+        if not isinstance(ref, dict):
+            issues.append(f"Manifest source_ref must be an object in {page_path}")
+            continue
+        if not str(ref.get("source_id", "")).strip():
+            issues.append(f"Manifest source_ref missing source_id in {page_path}")
+        block_ids = ref.get("block_ids", [])
+        if not isinstance(block_ids, list) or not block_ids:
+            issues.append(f"Manifest source_ref block_ids must be a non-empty list in {page_path}")
     return issues
 
 

@@ -68,6 +68,7 @@ def _normalize_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
     for key in required:
         if key not in plan:
             raise ValueError(f"Missing plan field: {key}")
+    source_id = str(plan["source_id"])
     pages = []
     for raw_page in plan["pages"]:
         page = dict(raw_page)
@@ -77,6 +78,8 @@ def _normalize_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
         page["type"] = _normalize_page_type(page["type"])
         page["path"] = _normalize_page_path(page["path"])
         page["source_block_ids"] = list(page.get("source_block_ids", []))
+        page["source_refs"] = _normalize_source_refs(page.get("source_refs"), source_id, page["source_block_ids"], page["path"])
+        page["aliases"] = _unique_strings(page.get("aliases", []))
         page["outgoing_links"] = [_normalize_page_path(link) for link in page.get("outgoing_links", [])]
         page["web_enrichments"] = _normalize_web_enrichments(page.get("web_enrichments", []), page["path"])
         pages.append(page)
@@ -84,12 +87,40 @@ def _normalize_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
     if web_enrichment and not isinstance(web_enrichment, Mapping):
         raise ValueError("Plan field web_enrichment must be an object")
     return {
-        "source_id": str(plan["source_id"]),
+        "source_id": source_id,
         "source_hash": str(plan["source_hash"]),
         "topic": str(plan["topic"]),
         "web_enrichment": dict(web_enrichment),
         "pages": pages,
     }
+
+
+def _normalize_source_refs(value: object, source_id: str, source_block_ids: list[Any], page_path: str) -> list[dict[str, Any]]:
+    if value in (None, []):
+        block_ids = _unique_strings(source_block_ids)
+        if not block_ids:
+            return []
+        return [{"source_id": source_id, "block_ids": block_ids, "quote_purpose": "source"}]
+    if not isinstance(value, list):
+        raise ValueError(f"source_refs must be a list in {page_path}")
+
+    refs: list[dict[str, Any]] = []
+    for index, raw_ref in enumerate(value):
+        if not isinstance(raw_ref, Mapping):
+            raise ValueError(f"source_refs[{index}] must be an object in {page_path}")
+        if "source_id" not in raw_ref or not str(raw_ref["source_id"]).strip():
+            raise ValueError(f"source_refs[{index}] missing source_id in {page_path}")
+        block_ids = raw_ref.get("block_ids", [])
+        if not isinstance(block_ids, list) or not block_ids:
+            raise ValueError(f"source_refs[{index}] block_ids must be a non-empty list in {page_path}")
+        refs.append(
+            {
+                "source_id": str(raw_ref["source_id"]).strip(),
+                "block_ids": _unique_strings(block_ids),
+                "quote_purpose": str(raw_ref.get("quote_purpose", "source")).strip() or "source",
+            }
+        )
+    return _dedupe_source_refs(refs)
 
 
 def _normalize_web_enrichments(value: object, page_path: str) -> list[dict[str, Any]]:
@@ -327,10 +358,29 @@ def _render_page(page: Mapping[str, Any], plan: Mapping[str, Any]) -> str:
         f'title: "{_escape_yaml(page["title"])}"',
         f'type: "{_escape_yaml(page["type"])}"',
         f'source_id: "{_escape_yaml(plan["source_id"])}"',
-        "source_blocks:",
+        "aliases:",
     ]
+    aliases = page.get("aliases", [])
+    if aliases:
+        frontmatter.extend(f'  - "{_escape_yaml(alias)}"' for alias in aliases)
+    else:
+        frontmatter.append("  []")
+    frontmatter.extend([
+        "source_blocks:",
+    ])
     if source_blocks:
         frontmatter.extend(f"  - {block_id}" for block_id in source_blocks)
+    else:
+        frontmatter.append("  []")
+    frontmatter.append("source_refs:")
+    source_refs = page.get("source_refs", [])
+    if source_refs:
+        for ref in source_refs:
+            frontmatter.append(f'  - source_id: "{_escape_yaml(ref["source_id"])}"')
+            frontmatter.append("    block_ids:")
+            for block_id in ref.get("block_ids", []):
+                frontmatter.append(f'      - "{_escape_yaml(block_id)}"')
+            frontmatter.append(f'    quote_purpose: "{_escape_yaml(ref.get("quote_purpose", "source"))}"')
     else:
         frontmatter.append("  []")
     frontmatter.append("---")
@@ -358,6 +408,14 @@ def _merge_manifest(existing: dict[str, Any], plan: Mapping[str, Any]) -> dict[s
         record = manifest["pages"].setdefault(page["path"], {"source_ids": []})
         record["title"] = page["title"]
         record["type"] = page["type"]
+        if page.get("aliases"):
+            record["aliases"] = list(page["aliases"])
+        else:
+            record.pop("aliases", None)
+        if page.get("source_refs"):
+            record["source_refs"] = deepcopy(page["source_refs"])
+        else:
+            record.pop("source_refs", None)
         record.setdefault("source_ids", [])
         if source_id not in record["source_ids"]:
             record["source_ids"].append(source_id)
@@ -386,6 +444,32 @@ def _dedupe_web_sources(sources: list[dict[str, str]]) -> list[dict[str, str]]:
         seen.add(identity)
         deduped.append(dict(source))
     return deduped
+
+
+def _dedupe_source_refs(refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, tuple[str, ...], str]] = set()
+    for ref in refs:
+        identity = (str(ref["source_id"]), tuple(str(item) for item in ref["block_ids"]), str(ref.get("quote_purpose", "")))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        deduped.append(dict(ref))
+    return deduped
+
+
+def _unique_strings(values: object) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    if values is None:
+        return result
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
 
 
 def _read_manifest(path: Path) -> dict[str, Any]:

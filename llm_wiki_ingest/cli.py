@@ -6,8 +6,11 @@ import sys
 from pathlib import Path
 from json import JSONDecodeError
 
+from .batch_extract import extract_directory
+from .build import build_wiki
 from .extractors import extract_document, write_extracted_json
 from .materialize import materialize_plan
+from .merge_plans import merge_plans_from_dir
 from .serve import serve_wiki
 from .stubs import clean_stub_pages
 from .validate import validate_wiki
@@ -20,6 +23,14 @@ def main(argv: list[str] | None = None) -> int:
     extract_parser = subparsers.add_parser("extract", help="Extract DOCX/PDF/MD/TXT into normalized JSON blocks.")
     extract_parser.add_argument("source", help="Input document path.")
     extract_parser.add_argument("--out", help="Output JSON path. Prints to stdout when omitted.")
+
+    extract_dir_parser = subparsers.add_parser("extract-dir", help="Extract all supported input documents into JSON blocks.")
+    extract_dir_parser.add_argument("--input", required=True, help="Input directory. Defaults should point at ./input.")
+    extract_dir_parser.add_argument("--out", required=True, help="Output directory for blocks and source-manifest.json.")
+
+    merge_parser = subparsers.add_parser("merge-plans", help="Merge per-document ingestion plans into one plan.")
+    merge_parser.add_argument("plan_dir", help="Directory containing local plan JSON files.")
+    merge_parser.add_argument("--out", required=True, help="Output merged ingestion plan JSON path.")
 
     materialize_parser = subparsers.add_parser("materialize", help="Create or update Quartz Markdown pages from a plan.")
     materialize_parser.add_argument("plan", help="Ingestion plan JSON path.")
@@ -40,6 +51,9 @@ def main(argv: list[str] | None = None) -> int:
     serve_parser.add_argument("--host", default="127.0.0.1", help="Bind host. Default: 127.0.0.1.")
     serve_parser.add_argument("--port", type=int, default=8888, help="Bind port. Default: 8888.")
 
+    build_parser = subparsers.add_parser("build", help="Run Quartz build for a wiki directory.")
+    build_parser.add_argument("--wiki", required=True, help="Quartz wiki directory.")
+
     args = parser.parse_args(argv)
     if args.command == "extract":
         try:
@@ -54,6 +68,24 @@ def main(argv: list[str] | None = None) -> int:
             write_extracted_json(document, args.out)
         else:
             print(json.dumps(document.to_dict(), ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "extract-dir":
+        try:
+            summary = extract_directory(args.input, args.out)
+        except (FileNotFoundError, ValueError) as error:
+            print(f"Input error: {error}", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "merge-plans":
+        try:
+            summary = merge_plans_from_dir(args.plan_dir, out_path=args.out)
+        except (FileNotFoundError, ValueError, JSONDecodeError) as error:
+            print(f"Plan error: {error}", file=sys.stderr)
+            return 1
+        print(json.dumps({"out": args.out, "pages": len(summary["pages"])}, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "materialize":
@@ -95,6 +127,15 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             print("\nServer stopped")
             return 0
+        return 0
+
+    if args.command == "build":
+        try:
+            summary = build_wiki(args.wiki)
+        except (FileNotFoundError, RuntimeError) as error:
+            print(f"Build error: {error}", file=sys.stderr)
+            return 1
+        print(json.dumps({key: summary[key] for key in ["command", "wiki"]}, ensure_ascii=False, indent=2))
         return 0
 
     return 2

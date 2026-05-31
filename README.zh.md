@@ -39,6 +39,69 @@ npm install
 
 ## 快速使用
 
+### 推荐流程：批量摄入 `input/`
+
+后续所有待摄入文档默认放入仓库根目录的 `input/`。当前工具会把 `input/` 中所有 `DOCX / PDF / MD / TXT` 批量抽取为 blocks，并生成 `source-manifest.json` 供 Claude Code 分批写摄入计划。
+
+```powershell
+python ingest_wiki.py extract-dir --input ".\input" --out ".\ingest-output"
+```
+
+输出位置：
+
+- `ingest-output/blocks/*.blocks.json`：每篇文档的标准文本块。
+- `ingest-output/source-manifest.json`：输入文档清单、hash、blocks 路径、文档类型和 skipped 文件。
+- `ingest-output/plans/`：建议放置 Claude Code 为每篇文档生成的局部计划。
+
+`extract-dir` 会按 SHA256 复用未变化文件的 blocks；新增或修改的文件会重新抽取。不支持的文件会跳过并写入 `skipped`，不会中断整体流程。
+
+可选新增 `input/input-manifest.json` 覆盖自动判断：
+
+```json
+{
+  "documents": {
+    "展览讲解词.docx": {
+      "document_type": "script",
+      "priority": 1
+    },
+    "某篇论文.docx": {
+      "document_type": "research"
+    }
+  }
+}
+```
+
+文档类型规则：
+
+- `script`：讲解词，生成路线 `stops/`，保留讲解顺序。
+- `research`：研究文献，生成来源页、主题页，并链接实体/概念页。
+- 所有文档合并为统一 Wiki；实体页和概念页跨文档复用。
+
+Claude Code 应按文档分批读取 `ingest-output/blocks/*.blocks.json`，把局部计划保存到 `ingest-output/plans/*.plan.json`。局部计划全部完成后合并：
+
+```powershell
+python ingest_wiki.py merge-plans ".\ingest-output\plans" --out ".\ingest-plan.json"
+```
+
+再执行 dry-run、写入、校验、构建和预览：
+
+```powershell
+python ingest_wiki.py materialize ".\ingest-plan.json" --wiki ".\wiki" --dry-run
+python ingest_wiki.py materialize ".\ingest-plan.json" --wiki ".\wiki" --apply
+python ingest_wiki.py validate --wiki ".\wiki"
+python ingest_wiki.py build --wiki ".\wiki"
+python ingest_wiki.py serve --wiki ".\wiki" --port 8888
+```
+
+内容比例和抽取规则：
+
+- 默认约 75% 来自本地 input，约 25% 来自联网补充。
+- 本地原文采用“较多摘录”，每页保留约 30-40% 关键原文段落，其余用整理性正文串联。
+- 联网补充按需每页 0-2 条，必须使用“联网补充” callout 标注。
+- 概念页采用中细粒度：有复用价值或解释价值才建页。
+- 实体页采用“出现即建页”；短页至少有摘要、原文摘录和来源。
+- 同义/近义概念采用“一主多别名”，只建一个主概念页并记录 `aliases`。
+
 ### 1. 抽取文档
 
 这里的 `source.docx` 是占位符，必须替换成真实文件名或真实路径。先在当前目录查看可摄入文档：
@@ -93,7 +156,7 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 - `source_block_ids` 必须引用对应的 block id，例如 `b0001`。
 - 默认启用联网补充，但联网检索和写作由 Claude Code 完成，脚本不直接联网。
 - 检索查询只使用实体名、书名、概念名，不使用讲解词原文片段作为搜索词。
-- 优先使用权威来源，`source_type` 只允许 museum / library / university / government / encyclopedia / publisher；百科只作兜底。
+- 优先使用权威来源，`source_type` 只允许 museum / library / university / government / encyclopedia / publisher / journal / database / archive；百科只作兜底。
 - 联网补充写入页面级 `web_enrichments`，每条必须有 `anchor_text`、`content_md` 和至少 1 个来源。
 - `anchor_text` 必须能在页面正文中找到，materialize 会把“联网补充” callout 插入该段落后。
 - 默认中等密度：stop 页每页 0-2 条，实体页和概念页每页约 1 条，不补首页 `index.md`。
@@ -127,8 +190,16 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
       "type": "stop",
       "path": "stops/01-welcome.md",
       "title": "欢迎词",
+      "aliases": [],
       "body_md": "页面正文。",
       "source_block_ids": ["b0001"],
+      "source_refs": [
+        {
+          "source_id": "zhanlan-jiangjieci",
+          "block_ids": ["b0001"],
+          "quote_purpose": "excerpt"
+        }
+      ],
       "outgoing_links": ["works/shi-ji.md"],
       "web_enrichments": [
         {
@@ -151,15 +222,15 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 
 支持的页面类型：
 
-| type | 用途 |
-| --- | --- |
-| `source` | 原始文档来源页 |
-| `stop` | 讲解点、路线节点 |
-| `exhibit` | 展品 |
-| `work` | 典籍、作品 |
-| `person` | 人物 |
-| `concept` | 概念 |
-| `place` | 地点 |
+| type        | 用途             |
+| ----------- | ---------------- |
+| `source`  | 原始文档来源页   |
+| `stop`    | 讲解点、路线节点 |
+| `exhibit` | 展品             |
+| `work`    | 典籍、作品       |
+| `person`  | 人物             |
+| `concept` | 概念             |
+| `place`   | 地点             |
 
 一个合格的摄入计划应满足：
 
@@ -170,6 +241,8 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 - `stop` 页按浏览顺序命名，例如 `stops/01-welcome.md`、`stops/02-history.md`。
 - 同一个典籍、人物或概念不要重复建页；多个讲解点都可链接到同一个实体页。
 - 概念页由 Claude Code 在摄入计划阶段生成，脚本不会自动猜测或补空概念页。
+- 多文档计划优先使用 `source_refs` 精确溯源；旧字段 `source_block_ids` 仍兼容。
+- 概念页可以使用 `aliases` 记录同义词，正文和链接统一指向主 slug。
 - 不确定是否应新建实体页时，先在摘要中标出，让用户确认。
 
 联网补充字段规则：
@@ -178,7 +251,7 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 - 页面级 `web_enrichments` 是数组；没有补充内容的页面可以省略该字段或设为空数组。
 - 每条 `web_enrichments` 必须包含 `anchor_text`、`content_md`、`sources`。
 - `sources` 中每个来源必须包含 `title`、`url`、`source_type`、`accessed_at`。
-- 允许的 `source_type`：`museum`、`library`、`university`、`government`、`encyclopedia`、`publisher`。
+- 允许的 `source_type`：`museum`、`library`、`university`、`government`、`encyclopedia`、`publisher`、`journal`、`database`、`archive`。
 - 同一页面复用同一来源时，manifest 会按标题、URL、类型和访问日期去重。
 
 渲染效果示例：
@@ -261,8 +334,7 @@ python ingest_wiki.py clean-stubs --wiki ".\wiki" --apply
 ### 7. 构建 HTML
 
 ```powershell
-cd wiki
-npx quartz build
+python ingest_wiki.py build --wiki ".\wiki"
 ```
 
 Quartz 会把 `wiki/content` 中的 Markdown 构建成 HTML。
@@ -294,8 +366,6 @@ http://127.0.0.1:8888/exhibits/changsheng-wuji-wadang
 ```powershell
 python ..\ingest_wiki.py serve --wiki "." --port 8888
 ```
-
-本地 `wiki/ingest_wiki.py` 只是为了兼容误在 `wiki/` 目录里运行 `python ingest_wiki.py ...` 的转发脚本，属于私有 wiki 辅助文件，不会推送 GitHub。
 
 ## 整体业务逻辑
 
@@ -374,11 +444,13 @@ python translate_wiki.py --content-dir ".\wiki\content" --engine zhipu
 默认 `.gitignore` 会排除：
 
 - 原始 `DOCX / PDF` 文档。
+- 本地 `input/`。
+- 本地 `ingest-output/`。
 - 本地生成的 `wiki/`。
 - 抽取出的 `*.blocks.json`。
 - 本地 `config.md`。
 
-如果源文档包含私有内容，只提交工具代码、README、计划文档和配置模板。`tests/` 和 `.claude/` 默认只保留在本地，不推送 GitHub。
+如果源文档包含私有内容，只提交工具代码、README、计划文档和配置模板。`tests/` 只保留在本地验证，不推送 GitHub。
 
 ## 测试
 
@@ -396,6 +468,8 @@ python -m unittest discover -v
 - 占位页清理与占位页残留校验。
 - 联网补充 callout 插入。
 - manifest `web_sources` 写入、去重和字段校验。
+- `extract-dir`、`merge-plans`、`build` 批量流程。
+- `source_refs` 与 `aliases`。
 - 翻译默认关闭。
 
 ## 文件结构
@@ -403,8 +477,11 @@ python -m unittest discover -v
 ```text
 llm_wiki_ingest/
   cli.py           # 命令行入口
+  batch_extract.py # input 目录批量抽取
+  build.py         # Quartz build 包装
   extractors.py    # 文档抽取
   materialize.py   # 根据摄入计划写入 wiki
+  merge_plans.py   # 局部计划合并
   models.py        # 数据结构
   slug.py          # slug 生成
   stubs.py         # 旧占位页识别与清理

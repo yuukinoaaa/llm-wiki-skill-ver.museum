@@ -1,10 +1,11 @@
 ---
 name: llm-wiki
-version: 1.0.0
+version: 1.1.0
 description: |
-  Ingest local documents into a Quartz-based LLM Wiki. The skill uses helper scripts
-  to extract DOCX/PDF/MD/TXT files, asks Claude Code to create an ingestion plan,
-  materializes interconnected Markdown pages, and validates wikilinks before build.
+  Ingest input/ documents into a unified Quartz-based LLM Wiki. The skill uses
+  helper scripts to batch-extract DOCX/PDF/MD/TXT files, asks Claude Code to
+  create per-document ingestion plans, merges plans, materializes interconnected
+  Markdown pages, validates links and source records, and builds Quartz HTML.
 allowed-tools:
   - Bash
   - Read
@@ -15,286 +16,209 @@ allowed-tools:
   - AskUserQuestion
 ---
 
-# /llm-wiki - Document Ingestion Wiki Manager
+# /llm-wiki - Batch Document Ingestion Wiki Manager
 
-Use this skill to turn local documents into a connected Quartz Wiki.
+Use this skill to turn local `input/` documents into a connected Quartz Wiki.
 
-The default workflow is document ingestion plus clearly marked web enrichment. Claude Code performs web research and writing; helper scripts do not search or fetch web sources. Query, lint/heal, bilingual generation, and GitHub Pages deployment are not default v1 behavior.
+The default workflow is batch document ingestion plus clearly marked web enrichment. Claude Code performs page planning, entity/concept splitting, writing, and web research; helper scripts do not search or fetch web sources.
 
 ## Core Rules
 
 - Use Chinese for user-facing communication unless the user asks otherwise.
-- Source documents are read-only. Never modify the user's source files.
+- Treat source documents as read-only.
+- Use `input/` as the default source directory for new ingestion work.
+- Build one unified Wiki: each document gets a `source` page, scripts create route `stop` pages, research documents create source/topic pages, and entity/concept pages are reused across documents.
+- Default content ratio: about 75% local input material and 25% marked web enrichment.
+- Local input should use relatively rich excerpts: about 30-40% key source passages per page, connected by concise explanatory writing.
 - Translation is disabled by default.
-- Chinese source documents should produce Chinese primary content by default.
-- Do not create bilingual `<div class="zh-trans">` blocks unless the user explicitly asks for translation and provides configuration.
-- Do not commit or upload private source documents, extracted block JSON, local wiki content, or generated HTML unless the user explicitly asks.
+- Do not commit or upload `input/`, extracted blocks, `ingest-output/`, private `ingest-plan.json`, private `wiki/`, generated HTML, `.claude/`, or `tests/`.
 - Use full Quartz wikilinks from the content root, for example `[[works/shi-ji|史记]]`.
-- Web enrichment is enabled by default, but every enriched paragraph must be marked as `联网补充` and backed by structured sources.
-- Search queries for enrichment must use only entity names, book/work names, concept names, or place names. Do not use private source text snippets as search queries.
-- Prefer authoritative sources: museums, libraries, universities, governments, and publishers. Encyclopedias are fallback only.
+- Do not create placeholder pages. Short pages must still contain a summary, a source excerpt, and source references.
 
-## Phase 0: Configuration Check
+## Phase 1: Extract Input Directory
 
-Read local configuration if available:
-
-```bash
-Read config.md
-```
-
-If `config.md` does not exist, use `config.example.md` as the template and ask the user for:
-
-- source document directory
-- Quartz wiki directory
-- whether translation should remain disabled
-
-Default translation settings:
-
-```yaml
-primary_engine: none
-fallback_engine: none
-bilingual_default: false
-```
-
-## Phase 1: Intent Routing
-
-Classify the user request into one of these actions:
-
-1. **Extract**: turn a document into normalized text blocks.
-2. **Plan**: create or review an ingestion plan from extracted blocks.
-3. **Enrich**: add marked web enrichments to the ingestion plan using authoritative sources.
-4. **Materialize**: write plan pages into a Quartz wiki.
-5. **Validate**: check generated pages, wikilinks, and structured web source records.
-6. **Build**: run Quartz build to create HTML.
-7. **Translate**: optional, explicit-only translation of existing pages.
-
-If intent is ambiguous, ask one concise question.
-
-## Phase 2: Extract Documents
-
-Supported v1 formats:
+Supported formats:
 
 - `.docx`
 - `.pdf` with extractable text
 - `.md`
 - `.txt`
 
-Run:
+Run from the repository root:
 
 ```bash
-python ingest_wiki.py extract "{source_file}" --out "{source_file}.blocks.json"
+python ingest_wiki.py extract-dir --input "input" --out "ingest-output"
 ```
 
-The output contains:
+This writes:
 
-- `source`: path, name, type, sha256
-- `blocks`: ordered text blocks with ids like `b0001`
+- `ingest-output/blocks/*.blocks.json`
+- `ingest-output/source-manifest.json`
+- `ingest-output/plans/` as the recommended location for local per-document plans
 
-If the source is a scanned PDF and text extraction is poor, report that OCR is out of v1 scope.
+`extract-dir` reuses unchanged block files by SHA256. Unsupported files are skipped and listed in `source-manifest.json`.
 
-## Phase 3: Create an Ingestion Plan
+Optional `input/input-manifest.json` can override automatic classification:
 
-Read the extracted block JSON and create a plan with this schema:
+```json
+{
+  "documents": {
+    "展览讲解词.docx": {
+      "document_type": "script",
+      "priority": 1
+    },
+    "某篇论文.docx": {
+      "document_type": "research"
+    }
+  }
+}
+```
+
+Use `document_type: "script"` for explanation scripts and `document_type: "research"` for papers or research materials.
+
+## Phase 2: Create Per-Document Plans
+
+For each extracted block file, read the matching source manifest entry and create one local plan JSON under `ingest-output/plans/`.
+
+Required page model:
+
+- Every input document gets a `source` page under `sources/`.
+- Script documents preserve route order with `stop` pages.
+- Research documents create source/topic pages and link to shared entities and concepts.
+- Entities use page types `exhibit`, `work`, `person`, `place`.
+- Concepts use page type `concept`, medium-fine granularity, and `aliases` for synonyms.
+
+Entity and concept rules:
+
+- Entity pages are created when a named entity appears. Avoid empty pages by adding a short summary, source excerpt, and source refs.
+- Concept pages are created when the term has reuse value or explanation value.
+- Do not create duplicate concept pages for synonyms. Pick one pinyin slug and put other names in `aliases`.
+
+Plan schema excerpt:
 
 ```json
 {
   "source_id": "stable-source-id",
-  "source_hash": "sha256-from-extract-output",
-  "topic": "topic-name",
-  "web_enrichment": {
-    "enabled": true,
-    "source_policy": "authoritative",
-    "density": "medium",
-    "query_policy": "entity_names_only"
-  },
+  "source_hash": "sha256-from-blocks",
+  "topic": "document topic",
   "pages": [
     {
-      "type": "stop",
-      "path": "stops/01-welcome.md",
-      "title": "欢迎词",
-      "body_md": "页面正文。",
-      "source_block_ids": ["b0001"],
-      "outgoing_links": ["works/shi-ji.md"],
-      "web_enrichments": [
+      "type": "source",
+      "path": "sources/stable-source-id.md",
+      "title": "文档标题",
+      "aliases": [],
+      "body_md": "页面正文，包含关键原文摘录和整理说明。",
+      "source_refs": [
         {
-          "anchor_text": "页面正文",
-          "content_md": "转述后的联网补充内容。",
-          "sources": [
-            {
-              "title": "来源标题",
-              "url": "https://example.com",
-              "source_type": "library",
-              "accessed_at": "2026-05-25"
-            }
-          ]
+          "source_id": "stable-source-id",
+          "block_ids": ["b0001"],
+          "quote_purpose": "excerpt"
         }
-      ]
+      ],
+      "outgoing_links": ["concepts/banben.md"],
+      "web_enrichments": []
     }
   ]
 }
 ```
 
-Allowed page types:
+Compatibility:
 
-- `source`: original document/source page
-- `stop`: route node or explanation stop
-- `exhibit`: exhibit object
-- `work`: book, classic, article, or other textual work
-- `person`: person
-- `concept`: concept or technique
-- `place`: place
+- Old `source_block_ids` is still accepted.
+- New multi-document plans should prefer `source_refs`.
 
-For exhibition scripts, use the route-plus-knowledge-graph model:
+## Phase 3: Web Enrichment
 
-- route pages preserve explanation order
-- entity pages stay concise
-- route pages link to entities
-- entity pages link back to route pages
-- a `stop` may cover multiple exhibits or works, but each exhibit/work/person/place/concept mentioned as an entity must have its own page and its own `outgoing_links` entry
+Web enrichment is enabled by default, but it must be clearly marked.
 
-Concept pages should use medium-dense granularity. Create concept pages for reusable terms that help visitors understand the exhibition, especially:
+Rules:
 
-- version studies: 版本, 写本, 印本, 刻本, 抄本
-- production techniques: 雕版印刷, 活字印刷, 石印, 铅印, 造纸技术, 制墨技术, 木刻水印, 套色印刷
-- classification systems: 经史子集, 经部, 史部, 子部, 集部, 小学
-- textual genres: 类书, 丛书, 方志, 家谱, 舆图, 校勘
-- carriers/forms: 刻符, 金文, 简牍, 封泥, 瓦当, 碑刻, 包背装
+- Query using entity names, book/work names, concept names, or place names only. Do not search private source text snippets.
+- Chinese authoritative sources are preferred; foreign authoritative sources are allowed when Chinese sources are insufficient.
+- Default density: 0-2 enrichments per useful page. Do not force enrichment on simple pages.
+- Each enrichment needs `anchor_text`, `content_md`, and at least one source.
+- `anchor_text` must appear in `body_md`.
+- Allowed `source_type`: `museum`, `library`, `university`, `government`, `encyclopedia`, `publisher`, `journal`, `database`, `archive`.
+- Encyclopedia sources are fallback only.
 
-Prefer 20-35 concept pages for a full exhibition script. The main page structure and source-traceable claims should come from the extracted blocks. Web enrichment may add concise external context only when it is clearly marked and sourced.
-
-Web enrichment rules:
-
-- Include root-level `web_enrichment` with `enabled: true`, `source_policy: authoritative`, `density: medium`, and `query_policy: entity_names_only`.
-- Add page-level `web_enrichments` only where the supplement helps the reader. Do not enrich `index.md`.
-- Default density: 0-2 enrichments for each `stop` page, about 1 enrichment for each entity or concept page.
-- Each enrichment must include `anchor_text`, `content_md`, and a non-empty `sources` list.
-- `anchor_text` must appear in the page `body_md`; the materializer inserts the callout after the paragraph containing it.
-- Each source must include `title`, `url`, `source_type`, and `accessed_at`.
-- Allowed `source_type` values: `museum`, `library`, `university`, `government`, `encyclopedia`, `publisher`.
-- Write enrichment content as paraphrase. If a short quote is necessary, keep it brief and cite the source.
-- Rendered callout format:
+Rendered callout:
 
 ```md
 > [!info] 联网补充
 > 补充内容……
 >
-> 来源：[来源标题](https://example.com)（library，访问：2026-05-25）
+> 来源：[来源标题](https://example.com)（library，访问：2026-05-31）
 ```
 
-When asked to generate a plan, first produce a short plan summary before writing JSON:
+## Phase 4: Merge Plans
 
-- route/stop pages to create, in order
-- entity pages to create or reuse
-- key `outgoing_links`
-- planned web enrichments: target pages, query terms, and source types
-- source block ranges used by each page
-- ambiguous items needing user confirmation
-
-After the user confirms, output valid JSON only. Keep these constraints:
-
-- `source_hash` must equal `source.sha256` from the extracted blocks JSON.
-- `source_block_ids` must use real block ids from the extracted JSON.
-- `type` should use singular values: `source`, `stop`, `exhibit`, `work`, `person`, `concept`, `place`.
-- `path` is relative to the Quartz `content` root and must not start with `content/`.
-- `path` should use ASCII pinyin slugs for Chinese concepts and entities, for example `concepts/diaoban-yinshua.md` or `works/shi-ji.md`.
-- Chinese titles belong in `title`, not in the file path.
-- `outgoing_links` should use Markdown paths such as `works/shi-ji.md`.
-- Every `outgoing_links` target must be defined in `pages` or already exist in `{wiki_dir}/content`; the materializer will not create placeholder/stub pages.
-- Do not duplicate the same person/work/concept page under different names.
-- Avoid English synonym duplicates such as `printing-tech` and `printing-technology`; use one pinyin concept such as `concepts/yinshua-jishu.md`.
-- Do not use source-document paragraphs as web search queries. Use entity/work/concept names only.
-
-## Phase 4: Review Before Writing
-
-Before writing files, summarize:
-
-- pages to create
-- pages to update
-- key entities
-- important links
-- source documents used
-
-Ask for confirmation if the plan touches many pages or source ambiguity remains.
-
-Dry-run:
+After per-document plans are ready:
 
 ```bash
-python ingest_wiki.py materialize "{plan_json}" --wiki "{wiki_dir}" --dry-run
+python ingest_wiki.py merge-plans "ingest-output/plans" --out "ingest-plan.json"
 ```
 
-If dry-run reports missing outgoing link targets, revise the plan by adding real pages or removing invalid links. Do not rely on automatic placeholder pages.
+Merge behavior:
 
-If dry-run reports a missing web enrichment anchor, missing source field, or unsupported `source_type`, revise the plan before applying.
+- Duplicate page paths are merged only when `type` and `title` match.
+- `aliases`, `source_refs`, `source_block_ids`, `outgoing_links`, and `web_enrichments` are combined.
+- Different bodies for the same page are appended under a source-specific section.
+- Missing `outgoing_links` targets fail the merge.
 
-## Phase 5: Materialize Pages
+## Phase 5: Materialize, Validate, Build, Serve
 
-After confirmation, write pages:
+Dry-run first:
 
 ```bash
-python ingest_wiki.py materialize "{plan_json}" --wiki "{wiki_dir}" --apply
+python ingest_wiki.py materialize "ingest-plan.json" --wiki "wiki" --dry-run
 ```
 
-This writes:
-
-- Markdown pages under `{wiki_dir}/content`
-- `{wiki_dir}/llm-wiki-manifest.json`
-
-The materializer automatically adds:
-
-- previous/next links between `stop` pages
-- related-page links from `outgoing_links`
-- backlinks from target pages to source pages
-- web enrichment callouts inserted after the paragraph containing `anchor_text`
-- per-page `web_sources` records in `llm-wiki-manifest.json`, deduped within the page
-
-It does not generate stub pages. To remove old stub pages generated by earlier versions:
+Apply after review:
 
 ```bash
-python ingest_wiki.py clean-stubs --wiki "{wiki_dir}" --dry-run
-python ingest_wiki.py clean-stubs --wiki "{wiki_dir}" --apply
+python ingest_wiki.py materialize "ingest-plan.json" --wiki "wiki" --apply
 ```
-
-## Phase 6: Validate and Build
 
 Validate:
 
 ```bash
-python ingest_wiki.py validate --wiki "{wiki_dir}"
+python ingest_wiki.py validate --wiki "wiki"
 ```
-
-Fix all reported issues before building.
-
-Validation checks web source records in the manifest for complete fields and allowed `source_type` values. It does not fetch URLs or verify availability.
 
 Build:
 
 ```bash
-cd "{wiki_dir}"
-npx quartz build
+python ingest_wiki.py build --wiki "wiki"
 ```
 
-Preview built HTML with clean URL support:
+Preview:
 
 ```bash
-python ingest_wiki.py serve --wiki "{wiki_dir}" --port 8888
+python ingest_wiki.py serve --wiki "wiki" --port 8888
 ```
 
-Run this from the repository root. If the shell is already inside the Quartz wiki directory, use:
+If the shell is already inside the Quartz wiki directory, use:
 
 ```bash
 python ../ingest_wiki.py serve --wiki "." --port 8888
 ```
 
-Do not recommend plain `python -m http.server` for Quartz `public/` output because Quartz links often omit `.html`, which causes concrete pages to 404 under the plain server.
+Do not recommend plain `python -m http.server` for Quartz `public/` output because Quartz clean URLs often omit `.html`.
 
-## Optional Translation Flow
+## Optional Single-File Extraction
 
-Only run translation when the user explicitly asks and provides a local API key.
-
-Example:
+For debugging one document:
 
 ```bash
-LLM_WIKI_TRANSLATION_ENGINE=zhipu ZHIPU_API_KEY=... python translate_wiki.py --content-dir "{wiki_dir}/content" --engine zhipu
+python ingest_wiki.py extract "{source_file}" --out "{source_file}.blocks.json"
+```
+
+## Optional Translation
+
+Only run translation when explicitly requested and configured with a local API key:
+
+```bash
+LLM_WIKI_TRANSLATION_ENGINE=zhipu ZHIPU_API_KEY=... python translate_wiki.py --content-dir "wiki/content" --engine zhipu
 ```
 
 Do not infer that translation is desired from the existence of `translate_wiki.py`.
@@ -303,10 +227,13 @@ Do not infer that translation is desired from the existence of `translate_wiki.p
 
 Do not stage or commit:
 
+- `input/`
+- `ingest-output/`
 - `.claude/`
 - `tests/`
 - source `.docx` / `.pdf`
 - extracted `*.blocks.json`
+- private `ingest-plan.json`
 - private local `wiki/`
 - Quartz `public/`
 - local `config.md`

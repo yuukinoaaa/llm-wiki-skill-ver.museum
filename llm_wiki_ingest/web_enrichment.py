@@ -10,6 +10,9 @@ ALLOWED_WEB_SOURCE_TYPES = {
     "government",
     "encyclopedia",
     "publisher",
+    "journal",
+    "database",
+    "archive",
 }
 WEB_SOURCE_REQUIRED_FIELDS = ("title", "url", "source_type", "accessed_at")
 

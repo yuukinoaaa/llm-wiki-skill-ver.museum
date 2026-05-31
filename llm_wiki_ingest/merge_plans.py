@@ -7,7 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from .materialize import _normalize_page_path, _normalize_page_type
+from .materialize import _normalize_aliases, _normalize_page_path, _normalize_page_type
 from .web_enrichment import ALLOWED_WEB_SOURCE_TYPES, WEB_SOURCE_REQUIRED_FIELDS
 
 
@@ -89,7 +89,7 @@ def _normalize_page(raw_page: Mapping[str, Any], source_id: str) -> dict[str, An
     page["source_block_ids"] = _unique_strings(page.get("source_block_ids", []))
     page["source_refs"] = _normalize_source_refs(page.get("source_refs"), source_id, page["source_block_ids"], page["path"])
     page["outgoing_links"] = _unique_strings(_normalize_page_path(str(link)) for link in page.get("outgoing_links", []))
-    page["aliases"] = _unique_strings(page.get("aliases", []))
+    page["aliases"] = _normalize_aliases(page.get("aliases", []), page["path"])
     page["web_enrichments"] = _normalize_web_enrichments(page.get("web_enrichments", []), page["path"])
     return page
 

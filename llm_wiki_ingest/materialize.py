@@ -79,7 +79,7 @@ def _normalize_plan(plan: Mapping[str, Any]) -> dict[str, Any]:
         page["path"] = _normalize_page_path(page["path"])
         page["source_block_ids"] = list(page.get("source_block_ids", []))
         page["source_refs"] = _normalize_source_refs(page.get("source_refs"), source_id, page["source_block_ids"], page["path"])
-        page["aliases"] = _unique_strings(page.get("aliases", []))
+        page["aliases"] = _normalize_aliases(page.get("aliases", []), page["path"])
         page["outgoing_links"] = [_normalize_page_path(link) for link in page.get("outgoing_links", [])]
         page["web_enrichments"] = _normalize_web_enrichments(page.get("web_enrichments", []), page["path"])
         pages.append(page)
@@ -470,6 +470,36 @@ def _unique_strings(values: object) -> list[str]:
         seen.add(text)
         result.append(text)
     return result
+
+
+def _normalize_aliases(values: object, page_path: str) -> list[str]:
+    if values in (None, []):
+        return []
+    if not isinstance(values, list):
+        raise ValueError(f"aliases must be a list of strings in {page_path}")
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for index, value in enumerate(values):
+        if not isinstance(value, str):
+            raise ValueError(f"Invalid alias in {page_path}: aliases[{index}] must be a string")
+        text = value.strip()
+        if not text:
+            continue
+        if _looks_like_structured_alias(text):
+            raise ValueError(f"Invalid alias in {page_path}: aliases[{index}] looks like structured data")
+        if text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def _looks_like_structured_alias(value: str) -> bool:
+    stripped = value.strip()
+    if stripped.startswith(("{", "[")) and stripped.endswith(("}", "]")):
+        return True
+    return any(marker in stripped for marker in ["anchor_text", "content_md", "source_type"])
 
 
 def _read_manifest(path: Path) -> dict[str, Any]:

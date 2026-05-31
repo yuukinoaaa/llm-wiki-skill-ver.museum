@@ -21,7 +21,7 @@ def build_wiki(wiki_dir: str | Path, runner: Runner = subprocess.run) -> dict[st
     if not npx:
         raise FileNotFoundError("npx command not found. Install Node.js/npm and run npm install in the Quartz wiki.")
     command = [npx, "quartz", "build"]
-    result = runner(command, cwd=wiki, text=True, capture_output=True)
+    result = runner(command, cwd=wiki, text=True, capture_output=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
         stderr = (result.stderr or "").strip()
         stdout = (result.stdout or "").strip()

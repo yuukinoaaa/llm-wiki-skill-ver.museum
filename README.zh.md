@@ -102,58 +102,41 @@ python ingest_wiki.py serve --wiki ".\wiki" --port 8888
 - 实体页采用“出现即建页”；短页至少有摘要、原文摘录和来源。
 - 同义/近义概念采用“一主多别名”，只建一个主概念页并记录 `aliases`。
 
-### 1. 抽取文档
+### 1. 让 Claude Code 生成局部摄入计划
 
-这里的 `source.docx` 是占位符，必须替换成真实文件名或真实路径。先在当前目录查看可摄入文档：
-
-```powershell
-Get-ChildItem -File -Include *.docx,*.pdf,*.md,*.txt
-```
-
-例如当前目录里有 `展览讲解词.docx`，就运行：
-
-```powershell
-python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.blocks.json"
-```
-
-输出文件包含：
-
-- `source`：源文件路径、文件名、类型、SHA256。
-- `blocks`：按顺序编号的文本块，如 `b0001`、`b0002`。
-
-### 2. 让 Claude Code 生成摄入计划
-
-`extract` 只负责把原文抽成文本块，不会自动判断哪些内容应该变成页面。下一步需要让 Claude Code 读取 `*.blocks.json`，生成一个明确的 `ingest-plan.json`。
+`extract-dir` 只负责把 `input/` 下的文档批量抽成文本块，不会自动判断哪些内容应该变成页面。下一步需要让 Claude Code 按文档读取 `ingest-output/blocks/*.blocks.json`，为每篇文档生成一个局部计划，保存到 `ingest-output/plans/*.plan.json`。
 
 推荐做法：
 
 1. 在本仓库根目录打开 Claude Code。
-2. 明确要求 Claude Code 先阅读并使用本目录下的 `SKILL.md`，按 `/llm-wiki` 的文档摄入流程工作。
-3. 让 Claude Code 读取刚生成的 `*.blocks.json`。
-4. 要求它先给出摄入计划摘要，包括将创建的路线页、实体页、主要互链和联网补充范围。
-5. 你确认摘要后，再让它输出完整 JSON。
-6. 将 JSON 保存为 `ingest-plan.json`。
+2. 明确要求 Claude Code 先阅读并使用本目录下的 `SKILL.md`，按 `/llm-wiki` 的 input 批量摄入流程工作。
+3. 让 Claude Code 读取 `ingest-output/source-manifest.json`，确认本轮有哪些 source。
+4. 让 Claude Code 每次只处理一个 `blocks/*.blocks.json`，先输出局部计划摘要。
+5. 你确认摘要后，再让它输出该文档的完整局部计划 JSON。
+6. 将每篇局部计划保存为 `ingest-output/plans/<source_id>.plan.json`。
 
 可以直接复制这段提示词给 Claude Code：
 
 ```text
-请使用当前仓库中的 `SKILL.md`，按 `/llm-wiki` 文档摄入流程工作。
-请先阅读 `SKILL.md`、`README.zh.md` 和 `展览讲解词.blocks.json`，然后为 llm-wiki 生成一个摄入计划 JSON。
+请使用当前仓库中的 `SKILL.md`，按 `/llm-wiki` 的 input 批量摄入流程工作。
+请先阅读 `SKILL.md`、`README.zh.md`、`ingest-output/source-manifest.json`，然后每次选择一个 `ingest-output/blocks/*.blocks.json` 生成局部摄入计划 JSON。
 
 要求：
 - 中文为主文，不生成双语翻译块。
-- 页面模型采用“路线页 + 知识图谱页”。
-- route/stop 页面保留原文讲解顺序，并用 `stops/01-xxx.md` 这类稳定路径。
-- 实体页只抽取重要对象，类型限于 exhibit / work / person / concept / place。
-- stop 可以是多个展品或典籍组成的路线节点，但其中每个展品、典籍、人物、地点、概念都要拆成独立实体页并逐个链接。
-- concept 采用中等偏密粒度，覆盖版本学、工艺、分类体系、文献体裁、版本载体/形态。
+- 所有文档最终合并为同一个统一 Wiki。
+- 每篇文档必须有一个 `source` 页，路径使用 `sources/<source_id>.md`。
+- 如果 `document_type` 是 `script`，保留讲解顺序并生成 `stops/01-xxx.md` 路线页。
+- 如果 `document_type` 是 `research`，生成来源页、主题页，并链接相关实体/概念页。
+- 实体页采用“出现即建页”，类型限于 exhibit / work / person / concept / place；短页至少包含摘要、原文摘录和来源。
+- concept 采用中细粒度：有复用价值或解释价值才建页；同义/近义概念使用一个主 slug，并把其他名称放入 `aliases`。
 - `type` 必须优先使用单数值：source / stop / exhibit / work / person / concept / place。
 - 每个 stop 页通过 `outgoing_links` 指向相关实体页；所有目标页面必须在 `pages` 中定义，或者已经存在于 `wiki/content`。
-- 实体页正文要简洁，并通过 materialize 自动获得反向链接。
 - 文件名使用 ASCII 拼音 slug，中文标题放在 `title` 字段，例如 `concepts/diaoban-yinshua.md`。
 - 不要生成英文同义重复页，例如 `printing-tech` 和 `printing-technology` 应合并为 `concepts/yinshua-jishu.md`。
 - `source_hash` 使用 blocks JSON 里的 `source.sha256`。
-- `source_block_ids` 必须引用对应的 block id，例如 `b0001`。
+- 多文档计划优先使用 `source_refs` 精确溯源；`source_refs[].source_id` 使用当前 source 的 `source_id`，`block_ids` 必须引用真实 block id，例如 `b0001`。
+- 内容比例默认约 75% 来自本地 input、25% 来自联网补充。
+- 本地原文采用“较多摘录”，每页保留约 30-40% 关键原文段落，其余用整理性正文串联。
 - 默认启用联网补充，但联网检索和写作由 Claude Code 完成，脚本不直接联网。
 - 检索查询只使用实体名、书名、概念名，不使用讲解词原文片段作为搜索词。
 - 优先使用权威来源，`source_type` 只允许 museum / library / university / government / encyclopedia / publisher / journal / database / archive；百科只作兜底。
@@ -163,16 +146,17 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 - 联网补充必须明确标注为补充内容，不要把它混入讲解词原文转述。
 
 请先输出“摄入计划摘要”，列出：
-1. 预计创建的 stop 页面
-2. 预计创建的实体页面
-3. 关键互链
-4. 预计联网补充的页面、查询词和来源类型
-5. 可能需要人工确认的歧义
+1. 当前处理的 source_id 和文档类型
+2. 预计创建或复用的 source / stop / topic 页面
+3. 预计创建或复用的实体页和概念页
+4. 关键互链
+5. 预计联网补充的页面、查询词和来源类型
+6. 可能需要人工确认的歧义
 
-我确认后，再输出完整 `ingest-plan.json`。不要直接修改源文档，不要把讲解词原文、blocks JSON 或生成的 wiki 内容提交到 Git。
+我确认后，再输出该文档的完整局部计划 JSON。不要直接修改源文档，不要把 input、blocks JSON、局部计划、总计划或生成的 wiki 内容提交到 Git。
 ```
 
-计划结构如下：
+局部计划结构如下：
 
 ```json
 {
@@ -192,10 +176,9 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
       "title": "欢迎词",
       "aliases": [],
       "body_md": "页面正文。",
-      "source_block_ids": ["b0001"],
       "source_refs": [
         {
-          "source_id": "zhanlan-jiangjieci",
+          "source_id": "source-demo",
           "block_ids": ["b0001"],
           "quote_purpose": "excerpt"
         }
@@ -263,13 +246,23 @@ python ingest_wiki.py extract ".\展览讲解词.docx" --out ".\展览讲解词.
 > 来源：[来源标题](https://example.com)（library，访问：2026-05-25）
 ```
 
-建议首轮概念数量控制在 20-35 个。优先抽取这些类型：
+概念抽取不要为每篇文档硬凑数量；多文档合并后按中细粒度去重建页。优先抽取这些类型：
 
 - 版本学：版本、写本、印本、刻本、抄本。
 - 工艺：雕版印刷、活字印刷、石印、铅印、造纸技术、制墨技术、木刻水印、套色印刷。
 - 分类体系：经史子集、经部、史部、子部、集部、小学。
 - 文献体裁：类书、丛书、方志、家谱、舆图、校勘。
 - 版本载体/形态：刻符、金文、简牍、封泥、瓦当、碑刻、包背装。
+
+### 2. 合并局部计划
+
+所有局部计划都保存到 `ingest-output/plans/` 后，合并为总计划：
+
+```powershell
+python ingest_wiki.py merge-plans ".\ingest-output\plans" --out ".\ingest-plan.json"
+```
+
+`merge-plans` 会合并同一路径页面的 `aliases`、`source_refs`、`outgoing_links` 和 `web_enrichments`。如果同一路径页面的 `type` 或 `title` 冲突，或者 `outgoing_links` 指向不存在页面，会直接失败。
 
 ### 3. Dry-run 检查
 

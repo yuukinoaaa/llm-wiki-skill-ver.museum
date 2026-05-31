@@ -24,7 +24,7 @@ Web enrichment is enabled in the default workflow, but helper scripts do not sea
 
 ```bash
 python ingest_wiki.py extract-dir --input input --out ingest-output
-python ingest_wiki.py extract path/to/your-real-source.docx --out source.blocks.json
+# Create per-document plans with Claude Code under ingest-output/plans/
 python ingest_wiki.py merge-plans ingest-output/plans --out ingest-plan.json
 python ingest_wiki.py materialize ingest-plan.json --wiki wiki --dry-run
 python ingest_wiki.py materialize ingest-plan.json --wiki wiki --apply

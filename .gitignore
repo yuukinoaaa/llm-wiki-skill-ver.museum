@@ -1,0 +1,16 @@
+config.md
+.claude/
+input/
+wiki/
+public/
+source-documents/
+ingest-output/
+*.docx
+*.pdf
+*.blocks.json
+ingest-plan.json
+*.ingest-plan.json
+*.pyc
+__pycache__/
+.pytest_cache/
+tests/
